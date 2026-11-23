@@ -181,10 +181,11 @@
   /* ---------- alerts ---------- */
   function feedItems() {
     var ceo = A.all().map(function (t) {
-      return { kind: 'ceo', id: 'c:' + t.id, key: (t.filedAt || t.date + 'T21:00:00Z'), t: t };
+      var filed = t.filedAt || (t.filedOn ? t.filedOn + 'T21:00:00Z' : null);
+      return { kind: 'ceo', id: 'c:' + t.id, key: filed || t.date + 'T21:00:00Z', filed: !!filed, t: t };
     });
     var pol = PTRADES.map(function (t) {
-      return { kind: 'pol', id: 'p:' + t.id, key: (t.filed || t.traded) + 'T12:00:00Z', t: t };
+      return { kind: 'pol', id: 'p:' + t.id, key: (t.filed || t.traded) + 'T12:00:00Z', filed: !!t.filed, t: t };
     });
     return ceo.concat(pol).sort(function (a, b) { return a.key < b.key ? 1 : a.key > b.key ? -1 : 0; }).slice(0, 60);
   }
@@ -228,8 +229,8 @@
         money(t.value) + '</strong> of <strong>' + esc(t.ticker) + '</strong></div>' +
         '<div class="alert__meta">' + esc(t.company) + ' · traded ' + dayLabel(t.date) +
         (t.price != null ? ' @ ' + (t.approxPrice ? '~' : '') + A.p2(t.price) : '') + ' ' + since + '</div>' +
-        '<div class="why"><div class="why__h">Possible reasons and how we know</div>' + A.reasonsHtml(t) +
-        (t.note ? '<p class="why__ctx"><strong>Context:</strong> ' + esc(t.note) + '</p>' : '') + '</div>' +
+        '<details class="why-d"><summary>Possible reasons, our guesses, with sources</summary><div class="why">' + A.reasonsHtml(t) +
+        (t.note ? '<p class="why__ctx"><strong>Context:</strong> ' + esc(t.note) + '</p>' : '') + '</div></details>' +
         '<div class="alert__acts"><button type="button" class="card__btn" data-chart="' + esc(t.id) + '">Chart</button>' + A.badge(t.source) + '</div>';
     } else {
       var lag = lagInfo(t), buy = t.type === 'buy';
@@ -242,7 +243,7 @@
     var img = spark(i.t.ticker, i.kind === 'ceo' ? t.date : t.traded, i.kind === 'ceo' ? t.price : null);
     return '<article class="alert' + (isNew(i) ? ' is-new' : '') + '"><div class="alert__img">' + img + '</div>' +
       '<div class="alert__body"><div class="alert__top"><span class="kind kind--' + i.kind + '">' + (i.kind === 'ceo' ? 'CEO buy' : 'Politician') +
-      '</span><span class="alert__when">' + (isNew(i) ? '<span class="dot" aria-label="new"></span>' : '') + 'Filed ' + ago(i.key) + '</span></div>' +
+      '</span><span class="alert__when">' + (isNew(i) ? '<span class="dot" aria-label="new"></span>' : '') + (i.filed ? 'Filed ' : 'Traded ') + ago(i.key) + '</span></div>' +
       body + '</div></article>';
   }
   function renderAlerts() {
