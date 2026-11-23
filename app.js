@@ -140,7 +140,8 @@
     }
     return t.filedOn ? dayLabel(t.filedOn, true) : 'Not known';
   }
-  function card(t) {
+  function card(t, opts) {
+    opts = opts || {};
     var dip = t.dip && t.dip.pct != null ? t.dip : null;
     var filedIso = t.filedAt ? t.filedAt.slice(0, 10) : t.filedOn;
     var lag = filedIso ? daysApart(t.date, filedIso) : null;
@@ -161,12 +162,16 @@
     if (t.also && t.also.length) extra += '<p class="card__also">Also: ' + t.also.map(esc).join('; ') + '</p>';
     if (t.note) extra += '<p class="card__note">' + esc(t.note) + '</p>';
     var n = reasons(t).length;
-    extra += '<details class="why-d"><summary>Possible reasons (' + n + ') and how we know</summary>' + reasonsHtml(t) + '</details>';
+    extra += '<details class="why-d"><summary>Possible reasons (' + n + '), our guesses, with sources</summary>' + reasonsHtml(t) + '</details>';
     var srcs = (t.sources || []).map(srcLink).join('');
     extra += '<div class="srcs"><span>Sources:</span> ' + (srcs || '<em>none, unverified</em>') + '</div>';
 
+    if (opts.body) {
+      return head + grid + extra + '<div class="rowc__acts"><button type="button" class="card__btn" data-id="' + esc(t.id) +
+        '">Price chart</button></div>';
+    }
     return '<article class="card">' +
-      '<div class="card__head">' + tile(t.ticker) +
+      '<div class="card__head">' +
       '<div class="card__id"><div class="card__ticker">' + esc(t.company) + ' <span class="tk">' + esc(t.ticker) + '</span></div>' +
       '<div class="card__co">' + badge(t.source) + (t.exchange ? ' · ' + esc(t.exchange) : '') + '</div></div>' +
       '<button type="button" class="card__btn" data-id="' + esc(t.id) + '" aria-label="Price chart for ' + esc(t.ticker) + '">Chart</button></div>' +
@@ -301,8 +306,18 @@
       if (state.sort === 'dip') return ((b.dip && b.dip.pct) || -1) - ((a.dip && a.dip.pct) || -1);
       return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.value || 0) - (a.value || 0);
     });
-    $('feed').innerHTML = list.length ? list.map(function (t) { return card(t); }).join('')
+    $('feed').innerHTML = list.length ? list.map(rowCard).join('')
       : '<div class="empty">No buys match these filters.</div>';
+  }
+
+  // Compact one-line row that opens into the full card. Keeps the full list scannable.
+  function rowCard(t) {
+    return '<details class="rowc"><summary>' +
+      '<div class="rowc__main"><div class="rowc__co">' + esc(t.company) + ' <span class="tk">' + esc(t.ticker) + '</span></div>' +
+      '<div class="rowc__who">' + esc(t.insider) + ' · ' + dayLabel(t.date) + ' · ' + badge(t.source) + '</div></div>' +
+      '<div class="rowc__amt">' + money(t.value) + '</div>' +
+      '<svg class="rowc__chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg>' +
+      '</summary><div class="rowc__body">' + card(t, { body: true }) + '</div></details>';
   }
 
   var CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
