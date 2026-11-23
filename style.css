@@ -43,7 +43,6 @@ h1, h2, p, ul { margin: 0; }
 .intro__bar { width: 4px; background: var(--accent); flex: none; }
 .intro__body { display: flex; align-items: center; gap: 16px; padding: 20px 20px 20px 18px; }
 .intro__text { font-size: 19px; line-height: 1.5; font-weight: 500; }
-.intro__icon { color: var(--accent); flex: none; display: none; }
 
 /* stats */
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -75,7 +74,7 @@ h1, h2, p, ul { margin: 0; }
 
 /* cards */
 .list { display: grid; gap: 14px; }
-@media (min-width: 820px) { .list { grid-template-columns: 1fr 1fr; } .intro__icon { display: block; } .wrap { padding-top: 26px; } }
+@media (min-width: 820px) { .list { grid-template-columns: 1fr 1fr; } .wrap { padding-top: 26px; } }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; display: grid; gap: 12px; align-content: start; }
 .card__head { display: flex; align-items: center; gap: 12px; }
@@ -336,3 +335,17 @@ body { font-size: 16px; }
 .x--sm { width: 30px; height: 30px; }
 .x--sm svg { width: 12px; height: 12px; }
 .badge--shot { color: #c9b8ff; }
+
+/* ---------- Alerts tab: slow glow while there is something unread, pop when something new arrives ---------- */
+.tab.has-new { animation: tab-glow 3s ease-in-out infinite; }
+.tab.has-new .ico { color: var(--accent); }
+@keyframes tab-glow {
+  0%, 100% { background: transparent; text-shadow: none; }
+  50% { background: radial-gradient(ellipse at 50% 60%, rgba(43, 184, 230, .22), transparent 70%); color: #d7f4ff; text-shadow: 0 0 14px rgba(43, 184, 230, .85); }
+}
+.pill { box-shadow: 0 0 0 0 rgba(255, 77, 61, .6); }
+.tab.has-new .pill { animation: pill-glow 3s ease-in-out infinite; }
+@keyframes pill-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 61, 0); } 50% { box-shadow: 0 0 10px 3px rgba(255, 77, 61, .55); } }
+.tab.pop .pill, .tab.pop .ico { animation: tab-pop .7s cubic-bezier(.2, 1.8, .4, 1) 2; }
+@keyframes tab-pop { 0% { transform: scale(1); } 35% { transform: scale(1.45) rotate(-12deg); } 65% { transform: scale(.92) rotate(8deg); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .tab.has-new, .tab.has-new .pill, .tab.pop .pill, .tab.pop .ico { animation: none !important; } }

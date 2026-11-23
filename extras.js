@@ -198,7 +198,16 @@
   function badgeCount() {
     var n = items.filter(isNew).length, el = $('unread');
     el.hidden = !n; el.textContent = n > 9 ? '9+' : String(n);
+    $('tab-alerts').classList.toggle('has-new', n > 0); // slow glow until they have been seen
+    return n;
   }
+  function popTab() { // quick bounce of the bell and the count
+    var t = $('tab-alerts');
+    t.classList.remove('pop'); void t.offsetWidth; t.classList.add('pop');
+    setTimeout(function () { t.classList.remove('pop'); }, 1600);
+  }
+  // If the Alerts tab is already open when something new lands, count it as seen after a few seconds.
+  function seenIfOpen() { if (!$('panel-alerts').hidden) setTimeout(markAllRead, 2500); }
   function markAllRead() {
     seen = items.map(function (i) { return i.id; });
     store(false, seen); badgeCount();
@@ -293,6 +302,7 @@
       ((r[0] && r[0].trades) || []).forEach(function (t) { if (!have['c:' + t.id]) fresh.push(t.insider + ' bought ' + money(t.value) + ' of ' + t.ticker); });
       ((r[1] && r[1].trades) || []).forEach(function (t) { if (!have['p:' + t.id]) fresh.push(t.name + ' ' + (t.type === 'buy' ? 'bought' : 'sold') + ' ' + t.ticker); });
       if (!fresh.length) return;
+      popTab();
       toastReload = true;
       $('toast-text').textContent = fresh.length + ' new trade' + (fresh.length > 1 ? 's' : '') + ' found. Reload to see them.';
       $('toast').hidden = false;
@@ -318,7 +328,8 @@
       lastCheck = Date.parse(j.checkedAt) || Date.now();
       var added = A.addTrades((j.trades || []).map(function (t) { t.seenAt = j.checkedAt; return t; }));
       if (added.length) {
-        items = feedItems(); renderAlerts(); badgeCount();
+        items = feedItems(); renderAlerts();
+        if (badgeCount()) { popTab(); seenIfOpen(); }
         if (!firstLive) {
           var lines = added.map(function (t) { return t.insider + ' (CEO) bought ' + money(t.value) + ' of ' + t.ticker; });
           $('toast-text').textContent = lines[0] + (lines.length > 1 ? ' and ' + (lines.length - 1) + ' more' : '');
@@ -341,6 +352,6 @@
     function (v) { pf.who = v; polFeed(); });
   polFeed(); polPeople(); polFigures();
   chips('al-filter', [['all', 'All'], ['ceo', 'CEOs'], ['pol', 'Politicians']], alf, function (v) { alf = v; renderAlerts(); });
-  renderAlerts(); badgeCount(); pushState();
+  renderAlerts(); if (badgeCount()) popTab(); pushState();
   show(location.hash.slice(1));
 })();
