@@ -1,3 +1,4 @@
+**ALL WRITTEN WITH AI RAUUGHH**
 # CEO Buys
 
 When and where CEOs buy their own company's stock, read straight from SEC Form 4 filings, plus trades
@@ -32,5 +33,4 @@ disclosed by members of Congress and the President. No build step, no framework.
 ## What was and was not tested
 Tested: Form 4 parsing, House PTR text and Senate PTR table parsing, the full updater flow and the live endpoint against
 mock servers, the live merge in a real browser, and every data row checked for a source and correct arithmetic.
-Not tested: the real SEC, House, Senate, Yahoo, ntfy and Vercel servers, which can't be reached from where this was built.
-Steps 7 and 13 above are the first real test.
+Not tested: the real SEC, House, Senate, Yahoo, ntfy and Vercel servers, (for now)
