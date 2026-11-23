@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CEO Buys</title>
+  <meta name="description" content="When and where CEOs buy their own company's stock, straight from SEC Form 4 filings.">
+  <meta name="theme-color" content="#0a0b0d">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <h1 class="brand">CEO Buys</h1>
+      <span class="updated" id="updated"></span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <div class="tabs__inner">
+      <button type="button" class="tab is-on" role="tab" id="tab-ceos" aria-controls="panel-ceos" aria-selected="true" data-tab="ceos">CEOs</button>
+      <button type="button" class="tab" role="tab" id="tab-politics" aria-controls="panel-politics" aria-selected="false" data-tab="politics">Politicians</button>
+      <button type="button" class="tab" role="tab" id="tab-alerts" aria-controls="panel-alerts" aria-selected="false" data-tab="alerts">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>Alerts<span class="pill" id="unread" hidden></span>
+      </button>
+    </div>
+  </nav>
+
+  <div class="wrap wrap--lag">
+    <details class="lag">
+      <summary><strong>Not real-time.</strong> CEO buys appear here within about 2 minutes of being filed, but the law lets CEOs file up to 2 business days after the trade. Politician trades appear 2 to 7 weeks after. <span class="lag__more">Why?</span></summary>
+      <ul>
+        <li><strong>The law allows a delay.</strong> CEOs have 2 business days to file a Form 4. Members of Congress have up to 45 days, and the President's reports often come later still.</li>
+        <li><strong>This site checks on a timer.</strong> With the live feed on (Vercel hosting), it checks the SEC every 60 seconds. Without it (GitHub Pages only), it checks every 10 minutes in US market hours, hourly otherwise, and GitHub sometimes runs late.</li>
+        <li><strong>Nobody legally sees these earlier.</strong> The SEC posts a filing to everyone at once. Paid terminals are faster at reading it, not earlier at getting it.</li>
+        <li><strong>Prices are end of day.</strong> Charts and "since buy" use daily closing prices, not live quotes.</li>
+        <li><strong>Some filings can't be read by machine.</strong> Scanned PDFs (common for the President and some House members) need a person to check them.</li>
+      </ul>
+    </details>
+  </div>
+
+  <main class="wrap panel" id="panel-ceos" role="tabpanel" aria-labelledby="tab-ceos">
+
+    <section class="intro" aria-labelledby="intro-title">
+      <div class="intro__bar" aria-hidden="true"></div>
+      <div class="intro__body">
+        <h2 id="intro-title" class="visually-hidden">What this page is</h2>
+        <p class="intro__text">This page tracks when executives buy their own company's stock. They know their business better than anyone, so when they put their own money in, it can mean they see better days ahead.</p>
+        <svg class="intro__icon" viewBox="0 0 64 64" width="56" height="56" aria-hidden="true">
+          <path d="M10 38 32 16l22 22" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M10 54 32 32l22 22" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+        </svg>
+      </div>
+    </section>
+
+    <section class="stats" id="stats" aria-label="Summary"></section>
+
+    <section class="block" aria-labelledby="clusters-title">
+      <div class="block__head">
+        <h2 id="clusters-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3.2 2.7-5.2 6-5.2s6 2 6 5.2"/><circle cx="17" cy="9" r="2.4"/><path d="M17 14c2.6 0 4 1.5 4 4"/></svg>Repeat and cluster buys</h2>
+      </div>
+      <p class="block__sub">The same company seeing more than one insider buy, or the same CEO coming back for more.</p>
+      <div class="cluster-row" id="clusters"></div>
+    </section>
+
+    <section class="block" aria-labelledby="dip-title">
+      <div class="block__head">
+        <h2 id="dip-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7l6 6 4-4 8 8"/><path d="M15 17h6v-6"/></svg>Bought the dip</h2>
+      </div>
+      <p class="block__sub">Insiders buying right after a sharp price drop. Only trades where we know how far the stock had fallen.</p>
+      <div class="list" id="dips"></div>
+    </section>
+
+    <section class="block" aria-labelledby="when-title">
+      <div class="block__head"><h2 id="when-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>When they buy</h2>
+        <div class="seg" id="when-toggle" role="group" aria-label="Chart measure">
+          <button type="button" class="seg__btn is-on" data-m="value" aria-pressed="true">Dollars</button>
+          <button type="button" class="seg__btn" data-m="count" aria-pressed="false">Buys</button>
+        </div>
+      </div>
+      <p class="block__sub">One bar per day, by the date the trade happened. Weekends are dimmed because markets are closed.</p>
+      <div class="chart" id="chart" role="group" aria-label="CEO buys by day"></div>
+      <p class="chart__detail" id="chart-detail" aria-live="polite"></p>
+      <p class="hint">Bar height is scaled so small buys stay visible. Filings follow within two business days, so a buy shows up on this page a day or two after it happened.</p>
+    </section>
+
+    <section class="block" aria-labelledby="where-title">
+      <div class="block__head"><h2 id="where-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>Where the money went</h2></div>
+      <p class="block__sub">Companies ranked by how much their CEOs bought in this window.</p>
+      <div class="where" id="where"></div>
+    </section>
+
+    <section class="block" aria-labelledby="feed-title">
+      <div class="block__head"><h2 id="feed-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>All CEO buys</h2></div>
+      <div class="filters" id="filters">
+        <div class="dd" id="dd-sort"></div>
+        <div class="dd" id="dd-size"></div>
+        <div class="dd" id="dd-conf"></div>
+      </div>
+      <div class="list" id="feed"></div>
+    </section>
+
+    <section class="note" aria-labelledby="note-title">
+      <h2 id="note-title">Read this before you copy a trade</h2>
+      <ul>
+        <li><strong>A CEO buying is a signal, not a promise.</strong> Intel's CEO bought at $95 in August and at $64.73 in November. Both buys were losing money when the second was filed. <a class="src" href="https://fourweekmba.com/ai-intel-ceo-tan-has-bought-19-7m-of-stock-at-an-average-77/" target="_blank" rel="noopener noreferrer">FourWeekMBA</a></li>
+        <li><strong>The signal is weaker at big companies.</strong> Research finds insider buying predicts returns more strongly at smaller companies. <a class="src" href="https://www.interactivebrokers.com/campus/traders-insight/securities/stocks/what-corporate-insider-buying-can-tell-investors-evidence-from-academic-research/" target="_blank" rel="noopener noreferrer">Interactive Brokers summary</a></li>
+        <li><strong>Unusual buys matter more than habits.</strong> A Harvard and NBER study found trades that break an insider's usual pattern carried the predictive power, while routine, yearly-habit trades earned about nothing. <a class="src" href="https://www.nber.org/papers/w16454.pdf" target="_blank" rel="noopener noreferrer">Cohen, Malloy and Pomorski (NBER)</a></li>
+        <li><strong>A buy can come with strings.</strong> HubSpot's Brian Halligan has to pay the company back about $450K in short-swing profits because of earlier sales. <a class="src" href="https://www.thecerbatgem.com/?p=10474672" target="_blank" rel="noopener noreferrer">The Cerbat Gem</a></li>
+      </ul>
+    </section>
+
+    <section class="note" aria-labelledby="gloss-title">
+      <h2 id="gloss-title">How to read this page</h2>
+      <dl class="gloss">
+        <div><dt>Form 4</dt><dd>The form insiders must file with the SEC within 2 business days of buying or selling their company's stock.</dd></div>
+        <div><dt>Open-market buy</dt><dd>The insider paid market price with their own money. Free shares from pay packages, option exercises and tax sales are left out.</dd></div>
+        <div><dt>Fallen from high</dt><dd>How far below a recent peak the stock was when they bought. The card says which peak was used.</dd></div>
+        <div><dt>Possible reasons</dt><dd>Our guesses from the numbers. Each one shows how we know and where the numbers came from. The insider did not give these reasons.</dd></div>
+        <div><dt>~ before a price</dt><dd>Worked out as dollar value divided by shares, because the source did not give the exact price.</dd></div>
+      </dl>
+      <p class="legend">
+        <span class="badge badge--sec">SEC filing</span> read straight from the Form 4 ·
+        <span class="badge badge--confirmed">Confirmed</span> 2+ reports of the filing agree ·
+        <span class="badge badge--reported">Reported</span> one report, not yet checked against the filing ·
+        <span class="badge badge--shot">Unverified</span> from a screenshot, not found in any public report
+      </p>
+      <p class="legal" id="coverage"></p>
+      <p class="legal">Information only. Not investment advice. Insiders buy for many reasons and can be wrong.</p>
+    </section>
+
+  </main>
+
+  <main class="wrap panel" id="panel-politics" role="tabpanel" aria-labelledby="tab-politics" hidden>
+    <section class="intro">
+      <div class="intro__bar" aria-hidden="true"></div>
+      <div class="intro__body">
+        <p class="intro__text">Stock trades disclosed by members of Congress and the President. The law only asks for dollar ranges and gives them weeks to report, so treat these as a record, not a live signal.</p>
+      </div>
+    </section>
+    <section class="stats" id="pol-stats" aria-label="Summary"></section>
+
+    <section class="block" aria-labelledby="pol-feed-title">
+      <div class="block__head"><h2 id="pol-feed-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V10M9 21V10M15 21V10M19 21V10M2 10l10-6 10 6z"/></svg>Recent trades</h2></div>
+      <div class="chips" id="pol-type" role="group" aria-label="Trade type"></div>
+      <div class="chips" id="pol-who" role="group" aria-label="Who"></div>
+      <div class="list" id="pol-feed"></div>
+    </section>
+
+    <section class="block" aria-labelledby="pol-people-title">
+      <div class="block__head"><h2 id="pol-people-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5"/></svg>By person</h2></div>
+      <p class="block__sub">Buys and sells disclosed in this window. This is not their full holdings. Holdings are only filed once a year.</p>
+      <div class="list" id="pol-people"></div>
+    </section>
+
+    <section class="block" aria-labelledby="pol-hold-title">
+      <div class="block__head"><h2 id="pol-hold-title"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="6" width="17" height="14" rx="2.5"/><path d="M8 6V4h8v2"/></svg>Current holdings</h2></div>
+      <p class="block__sub">Holdings come from annual reports, filed once a year in value ranges. These are the official places to read them.</p>
+      <div class="list" id="pol-figures"></div>
+      <div class="links" id="pol-links"></div>
+    </section>
+
+    <section class="note">
+      <h2>Read this before you copy a trade</h2>
+      <ul>
+        <li>Amounts are ranges. "$1,001 - $15,000" could be $1,100 or $15,000.</li>
+        <li>Many trades are made by a spouse or a fund manager, not the politician personally.</li>
+        <li>By the time a trade is public, the price has usually moved. A 45-day-old trade is old news.</li>
+        <li>This list shows recent trades I could confirm. It is not a full or balanced sample of Congress until the updater has run.</li>
+      </ul>
+      <p class="legend">
+        <span class="badge badge--sec">Official</span> parsed from the House or Senate filing ·
+        <span class="badge badge--reported">Reported</span> from a news or tracker site (linked on each card)
+      </p>
+    </section>
+  </main>
+
+  <main class="wrap panel" id="panel-alerts" role="tabpanel" aria-labelledby="tab-alerts" hidden>
+    <div class="alerts__bar">
+      <div class="chips" id="al-filter" role="group" aria-label="Show"></div>
+      <button type="button" class="btn-ghost" id="al-read">Mark all read</button>
+    </div>
+    <div class="push" id="push">
+      <div>
+        <strong>Get alerts</strong>
+        <p id="push-text">Turn on browser alerts to get a ping when new buys show up while this page is open.</p>
+      </div>
+      <button type="button" class="card__btn" id="push-btn">Turn on</button>
+    </div>
+    <p class="hint">Possible reasons are guesses worked out from the numbers (size, dip, repeat buys). The insider did not say them. Use them as questions to research, not answers.</p>
+    <div class="alerts" id="alerts"></div>
+  </main>
+
+  <div class="toast" id="toast" hidden role="status">
+    <span id="toast-text">New trades found.</span>
+    <button type="button" class="card__btn" id="toast-btn">View</button>
+    <button type="button" class="x x--sm" id="toast-x" aria-label="Dismiss"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
+  </div>
+
+  <div class="modal" id="chart-modal" hidden>
+    <div class="modal__scrim" data-close></div>
+    <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="cm-title">
+      <div class="sheet__head">
+        <div class="sheet__id"><h2 id="cm-title"></h2><p id="cm-sub"></p></div>
+        <button type="button" class="x" id="cm-close" aria-label="Close chart" data-close>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg>
+        </button>
+      </div>
+      <p class="demo" id="cm-demo" hidden>Demo prices, made up for preview. Real history appears once the updater has run.</p>
+      <div class="readout" id="cm-readout"></div>
+      <div class="pchart" id="cm-chart"></div>
+      <div class="ranges" id="cm-ranges" role="group" aria-label="Chart range"></div>
+      <div class="cm-stats" id="cm-stats"></div>
+      <div class="cm-hist" id="cm-hist"></div>
+    </section>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="politics.js"></script>
+  <script src="prices.js" onerror="this.remove()"></script>
+  <script src="app.js"></script>
+  <script src="extras.js"></script>
+</body>
+</html>
