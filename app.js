@@ -505,6 +505,7 @@
   }
 
   function drawChart(t, s) {
+        if (window.ChartPro) return window.ChartPro.draw(t, s, { trades: TRADES, range: cs.range, ranges: RANGES, p2: p2, day: dayLabel, esc: esc, money: money, stats: statsHtml, epoch: toEpoch });
     var n0 = s.d.length, lastD = s.d[n0 - 1];
     var days = RANGES.filter(function (r) { return r[0] === cs.range; })[0][1];
     var i0 = 0; while (i0 < n0 - 2 && s.d[i0] < lastD - days) i0++;
