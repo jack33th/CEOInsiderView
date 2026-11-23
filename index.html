@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>CEO Buys</title>
   <meta name="description" content="When and where CEOs buy their own company's stock, straight from SEC Form 4 filings.">
-  <meta name="theme-color" content="#0a0b0d">
+  <meta name="theme-color" content="#0b0d10">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -28,7 +31,7 @@
 
   <div class="wrap wrap--lag">
     <details class="lag">
-      <summary><strong>Not real-time.</strong> CEO buys appear here within about 2 minutes of being filed, but the law lets CEOs file up to 2 business days after the trade. Politician trades appear 2 to 7 weeks after. <span class="lag__more">Why?</span></summary>
+      <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span><strong>Delayed data.</strong> CEO buys show here minutes after filing. Filings can come 2 business days after the trade, and politicians report weeks later.</span><span class="lag__more">Why</span></summary>
       <ul>
         <li><strong>The law allows a delay.</strong> CEOs have 2 business days to file a Form 4. Members of Congress have up to 45 days, and the President's reports often come later still.</li>
         <li><strong>This site checks on a timer.</strong> With the live feed on (Vercel hosting), it checks the SEC every 60 seconds. Without it (GitHub Pages only), it checks every 10 minutes in US market hours, hourly otherwise, and GitHub sometimes runs late.</li>
@@ -176,6 +179,7 @@
       <div class="chips" id="al-filter" role="group" aria-label="Show"></div>
       <button type="button" class="btn-ghost" id="al-read">Mark all read</button>
     </div>
+    <div class="alerts" id="alerts"></div>
     <div class="push" id="push">
       <div>
         <strong>Get alerts</strong>
@@ -183,8 +187,6 @@
       </div>
       <button type="button" class="card__btn" id="push-btn">Turn on</button>
     </div>
-    <p class="hint">Possible reasons are guesses worked out from the numbers (size, dip, repeat buys). The insider did not say them. Use them as questions to research, not answers.</p>
-    <div class="alerts" id="alerts"></div>
   </main>
 
   <div class="toast" id="toast" hidden role="status">
