@@ -443,6 +443,7 @@ body { font-variant-numeric: tabular-nums; letter-spacing: -.005em; }
 .why-d summary::-webkit-details-marker { display: none; }
 .why-d summary { list-style: none; }
 .kind { letter-spacing: .03em; }
+
 /* ===== enhance.js: smooth chart, quotes, avatars ===== */
 .pc-line { stroke-width: 2.4; }
 .pc-in { opacity: 0; transition: opacity .35s ease .55s; }
