@@ -6,6 +6,7 @@
   var PRICES = window.INSIDER_PRICES || {};
 
   /* ---------- rolling numbers ($11 -> $12 -> $20 instead of jumping) ---------- */
+  // Splits "$43.1M" into prefix "$", number 43.1, suffix "M", 1 decimal, so it can count smoothly.
   function parseNum(text) {
     var m = String(text).match(/^([^\d\-−+]*)([\-−+]?)([\d,]*\.?\d+)(.*)$/);
     if (!m) return null;
@@ -18,6 +19,7 @@
     if (p.comma) s = s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return p.pre + (neg ? '−' : (p.sign ? '+' : '')) + s + p.suf;
   }
+  // Animate an element's text to `text`. Starts from its last value (or from 0 the first time).
   function roll(el, text, ms) {
     if (!el) return;
     var p = parseNum(text);
@@ -27,7 +29,7 @@
     el.dataset.v = to;
     cancelAnimationFrame(el._raf);
     (function step(now) {
-      var k = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - k, 3);
+      var k = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - k, 3); // ease-out
       el.textContent = k < 1 ? fmt(p, from + (to - from) * e) : text;
       if (k < 1) el._raf = requestAnimationFrame(step);
     })(start);
@@ -44,7 +46,7 @@
   }
   function money2(v) { return '$' + (v >= 1 ? v.toFixed(2) : v.toFixed(3)); }
 
-  // Smooth curve through the points that never overshoots a real closing price.
+  // Monotone cubic curve through the points: smooth like Yahoo, but never overshoots a real close.
   function smoothPath(xs, ys) {
     var n = xs.length;
     if (n < 3) return xs.map(function (x, i) { return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + ys[i].toFixed(1); }).join('');
@@ -66,7 +68,7 @@
     }
     return d;
   }
-  // Round axis labels ($13, $14, $15) instead of odd numbers like $16.74.
+  // Round axis labels ($13, $14, $15 ...) instead of odd numbers like $16.74.
   function niceTicks(lo, hi, count) {
     var span = hi - lo, raw = span / Math.max(1, count), mag = Math.pow(10, Math.floor(Math.log10(raw)));
     var step = [1, 2, 2.5, 5, 10].map(function (f) { return f * mag; }).filter(function (s) { return s >= raw; })[0] || 10 * mag;
@@ -102,7 +104,7 @@
       var y = PY(v);
       if (y < T - 2 || y > H - B + 2) return;
       grid += '<line class="pc-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '"/>';
-      if (paidY == null || Math.abs(y - paidY) > 16) {
+      if (paidY == null || Math.abs(y - paidY) > 16) { // never hide a label behind the "price paid" tag
         grid += '<text class="pc-axis" x="' + (W - R + 8) + '" y="' + (y + 4).toFixed(1) + '">$' + (v >= 100 ? v.toFixed(0) : v.toFixed(v % 1 ? 2 : 0)) + '</text>';
       }
     });
@@ -111,7 +113,7 @@
         (j === 0 ? 'start' : j === 3 ? 'end' : 'middle') + '">' + X.day(toDate(D[k])) + '</text>';
     });
 
-    // Buy markers sit ON the line (that day's close). The dashed line shows the price paid.
+    // Buy markers sit ON the price line (that day's close). The dashed line shows the actual price paid.
     var marks = '', sel = '';
     buys.forEach(function (b) {
       var k = idxOn(X.epoch(b.date)), cx = xs[k], cy = ys[k];
@@ -156,11 +158,11 @@
       })(t0);
     } else svg.classList.add('is-drawn');
 
-    // Readout with rolling numbers and a gliding crosshair.
+    // Readout with rolling numbers, and a crosshair that glides between days.
     var ro = document.getElementById('cm-readout');
     ro.innerHTML = '<span class="readout__d" id="ro-d"></span><span class="readout__p" id="ro-p"></span>' +
       '<span id="ro-c"></span><span class="readout__hint" id="ro-h">Drag across the chart</span>';
-    var cur = n - 1, curG = document.getElementById('pc-cur'), dot = curG.querySelector('.pc-dot');
+    var cur = n - 1, curG = document.getElementById('pc-cur'), dot = curG.querySelector('.pc-dot'), shown = false;
     function read(k, live) {
       var v = C[k], since = t.price ? (v / t.price - 1) * 100 : null;
       document.getElementById('ro-d').textContent = X.day(toDate(D[k]), true);
@@ -174,6 +176,7 @@
       curG.style.opacity = live ? 1 : 0;
       curG.style.transform = 'translateX(' + xs[k].toFixed(1) + 'px)';
       dot.setAttribute('cy', ys[k].toFixed(1));
+      if (!shown && live) { curG.classList.add('is-on'); shown = true; }
     }
     function fromEvent(ev) {
       var r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * W;
@@ -210,7 +213,7 @@
   }
   window.ChartPro = { draw: draw };
 
-  /* ---------- live price next to tickers, initials avatars, rolling stats ---------- */
+  /* ---------- page enhancements: live price next to tickers, initials avatars, rolling stats ---------- */
   var AV_COLORS = ['#3b6fb6', '#2f8f6b', '#9a5bc4', '#b7652c', '#2f8a9a', '#a84a6a', '#6f7d2f', '#5b63c4'];
   function avatarFor(name) {
     var parts = String(name).trim().split(/\s+/), h = 0;
@@ -219,6 +222,7 @@
     return '<span class="ceo-av" style="--av:' + AV_COLORS[h % AV_COLORS.length] + '" aria-hidden="true">' + ini + '</span>';
   }
   function enhance(root) {
+    // 1) Ticker chips show the latest close and today's move, like a quote.
     Array.prototype.forEach.call(root.querySelectorAll('.tk:not([data-q])'), function (el) {
       el.setAttribute('data-q', '1');
       var q = lastTwo(el.textContent.trim());
@@ -227,6 +231,7 @@
       el.insertAdjacentHTML('afterend', '<span class="quote ' + (up ? 'pos' : 'neg') + '" title="Latest daily close">' +
         money2(q.price) + ' <b>' + (up ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</b></span>');
     });
+    // In compact rows, let only the company name shorten, so the ticker and price always stay visible.
     Array.prototype.forEach.call(root.querySelectorAll('.rowc__co:not([data-w])'), function (el) {
       el.setAttribute('data-w', '1');
       var first = el.firstChild;
@@ -235,6 +240,7 @@
         span.textContent = first.textContent.trim(); el.replaceChild(span, first);
       }
     });
+    // 2) An initials avatar in front of the CEO's name on each card.
     Array.prototype.forEach.call(root.querySelectorAll('.headline:not([data-av])'), function (el) {
       el.setAttribute('data-av', '1');
       var nm = el.querySelector('strong');
@@ -243,10 +249,11 @@
   }
   function rollStats() {
     Array.prototype.forEach.call(document.querySelectorAll('.stat__value'), function (el) {
-      if (el.dataset.rolled) return;
+      if (el.dataset.rolled) return; // only new numbers roll; avoids re-triggering while animating
       var txt = el.textContent; el.dataset.rolled = '1'; roll(el, txt, 900);
     });
   }
+  // Re-apply whenever the app redraws a section (filters, live updates, opening a row).
   var queued = false;
   new MutationObserver(function () {
     if (queued) return;
