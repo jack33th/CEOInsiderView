@@ -1,0 +1,51 @@
+name: Update CEO buys
+
+on:
+  schedule:
+    - cron: "*/10 12-22 * * 1-5"   # every 10 minutes across US market hours (UTC): new CEO filings
+    - cron: "5 * * * *"            # hourly: CEO filings + House and Senate trades
+    - cron: "30 11 * * *"          # daily: full backfill + refresh all prices
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "backfill = rebuild everything (use this the first time), live = new filings only"
+        type: choice
+        options: [backfill, live]
+        default: backfill
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-ceo-buys
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pypdf
+      - name: Pull SEC, House and Senate filings and prices
+        env:
+          # Settings > Secrets and variables > Actions > New repository secret
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}   # e.g. Jane Doe jane@example.com (required)
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}           # optional, for phone alerts
+          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 11 * * *' && 'backfill' || 'live') }}
+          POLITICS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule != '*/10 12-22 * * 1-5') && '--politics' || '' }}
+        run: python scripts/update_data.py --mode "$MODE" --days 30 --min-value 25000 $POLITICS
+      - name: Commit only if something changed
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add data.js prices.js politics.js
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "Update insider trades"
+            git pull --rebase
+            git push
+          fi
