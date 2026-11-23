@@ -1,4 +1,6 @@
-**ALL WRITTEN WITH AI RAUUGHH**
+**WIP**
+Vibe Coded w/ Claude, but the aim is to develop this as best it can be. 
+**ALL WRITTEN WITH AI**
 # CEO Buys
 
 When and where CEOs buy their own company's stock, read straight from SEC Form 4 filings, plus trades
