@@ -443,3 +443,25 @@ body { font-variant-numeric: tabular-nums; letter-spacing: -.005em; }
 .why-d summary::-webkit-details-marker { display: none; }
 .why-d summary { list-style: none; }
 .kind { letter-spacing: .03em; }
+/* ===== enhance.js: smooth chart, quotes, avatars ===== */
+.pc-line { stroke-width: 2.4; }
+.pc-in { opacity: 0; transition: opacity .35s ease .55s; }
+.pc-in--late { transition-delay: .75s; }
+svg.is-drawn .pc-in { opacity: 1; }
+.pc-mk { fill: var(--blue); stroke: var(--bg); stroke-width: 2.5; }
+.pc-mk--sel { fill: #ffd23f; stroke: #fff; stroke-width: 2.5; }
+.pc-halo { fill: rgba(255, 210, 63, .22); }
+.pc-cur { transition: transform .12s ease-out, opacity .2s; }
+.pc-cross { stroke: #9aa3ae; stroke-width: 1; stroke-dasharray: 3 3; }
+.pc-dot { fill: var(--text); stroke: var(--bg); stroke-width: 2.5; }
+.readout { align-items: baseline; }
+.readout__p { font-size: 28px; font-weight: 800; min-width: 4ch; }
+.readout__hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+.cm-stat__v { font-size: 19px; font-weight: 800; }
+.quote { font-size: 13px; font-weight: 700; margin-left: 6px; white-space: nowrap; }
+.quote b { font-weight: 700; font-size: 12px; }
+.ceo-av { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--av); color: #fff; font-size: 12px; font-weight: 800; margin-right: 8px; vertical-align: -8px; }
+@media (prefers-reduced-motion: reduce) { .pc-in, .pc-cur { transition: none; } }
+.rowc__co { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.rowc__co .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rowc__co .tk, .rowc__co .quote { flex: none; }
