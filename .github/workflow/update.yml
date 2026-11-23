@@ -31,9 +31,8 @@ jobs:
       - run: pip install pypdf
       - name: Pull SEC, House and Senate filings and prices
         env:
-          # Settings > Secrets and variables > Actions > New repository secret
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}   # e.g. Jane Doe jane@example.com (required)
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}           # optional, for phone alerts
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 11 * * *' && 'backfill' || 'live') }}
           POLITICS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule != '*/10 12-22 * * 1-5') && '--politics' || '' }}
         run: python scripts/update_data.py --mode "$MODE" --days 30 --min-value 25000 $POLITICS
