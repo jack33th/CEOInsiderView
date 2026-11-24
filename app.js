@@ -1,25 +1,13 @@
+/* CEO Insider View: one file for the whole site.
+   Data: data.js (CEO buys), spark.js (2-month prices + quotes), prices/TICKER.json (full history, on demand),
+         companies.js (company details + CEO 12-month history, on demand), politics.js (Congress, on demand),
+         /api/live (new filings straight from the SEC, every 30 s). */
 (function () {
   'use strict';
 
-  var DATA = window.INSIDER_DATA || { trades: [] };
-  var TRADES = (DATA.trades || []).filter(function (t) { return t && t.date && t.ticker; });
-  // Once real SEC rows exist, show only those so every number is exact.
-  var HAS_SEC = TRADES.some(function (t) { return t.source === 'sec'; });
-  if (HAS_SEC) TRADES = TRADES.filter(function (t) { return t.source === 'sec'; });
-  // Unverified rows stay out of every summary (stats, clusters, dips, charts); they only appear in the full feed.
-  function VER() { return TRADES.filter(function (t) { return t.source !== 'screenshot'; }); }
-  var DIP_MIN = 25; // percent below peak that counts as "bought the dip"
-
-  var SOURCE = {
-    sec:        { label: 'SEC filing',     cls: 'badge--sec',       rank: 3 },
-    official:   { label: 'Official',       cls: 'badge--sec',       rank: 3 },
-    confirmed:  { label: 'Confirmed',      cls: 'badge--confirmed', rank: 2 },
-    reported:   { label: 'Reported',       cls: 'badge--reported',  rank: 1 },
-    screenshot: { label: 'Unverified',     cls: 'badge--shot',      rank: 0 }
-  };
-
-  /* ---------- helpers ---------- */
-  function $(id) { return document.getElementById(id); }
+  /* =================== helpers =================== */
+  var $ = function (id) { return document.getElementById(id); };
+  var REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -27,636 +15,748 @@
   }
   function money(v) {
     if (v == null || isNaN(v)) return '—';
-    if (v >= 999500) return '$' + Number((v / 1e6).toFixed(1)) + 'M';
-    if (v >= 1e3) return '$' + Math.round(v / 1e3) + 'K';
+    var a = Math.abs(v);
+    if (a >= 999500) return '$' + Number((v / 1e6).toFixed(a >= 1e8 ? 0 : 1)) + 'M';
+    if (a >= 1e3) return '$' + Math.round(v / 1e3) + 'K';
     return '$' + Math.round(v);
   }
-  function price(t) {
-    if (t.price == null) return '—';
-    var p = t.price >= 1 ? t.price.toFixed(2) : t.price.toFixed(3);
-    return (t.approxPrice ? '~' : '') + '$' + p.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  }
-  function stamp(iso) {
-    var d = new Date(iso);
-    return isNaN(d) ? '' : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  }
-  function num(n) { return n == null ? null : n.toLocaleString('en-US'); }
+  function p2(v) { return v == null ? '—' : '$' + (v >= 1 ? v.toFixed(2) : v.toFixed(3)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function num(n) { return n == null ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function signPct(v, d) { return (v < 0 ? '−' : '+') + Math.abs(v).toFixed(d == null ? 1 : d) + '%'; }
   function parseDay(iso) { return new Date(iso + 'T00:00:00Z'); }
-  function dayLabel(iso, withYear) {
+  function epoch(iso) { return Math.round(parseDay(iso).getTime() / 864e5); }
+  function isoOf(e) { return new Date(e * 864e5).toISOString().slice(0, 10); }
+  function day(iso, year) {
     var o = { month: 'short', day: 'numeric', timeZone: 'UTC' };
-    if (withYear) o.year = 'numeric';
+    if (year) o.year = 'numeric';
     return parseDay(iso).toLocaleDateString('en-US', o);
   }
-  function isWeekend(iso) { var d = parseDay(iso).getUTCDay(); return d === 0 || d === 6; }
-  function edgarUrl(ticker) {
-    return 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + encodeURIComponent(ticker) +
-      '&type=4&dateb=&owner=include&count=40';
+  function et(isoDT) {
+    return new Date(isoDT).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET';
   }
-  function sum(list, fn) { return list.reduce(function (a, t) { return a + (fn(t) || 0); }, 0); }
-  function badge(src) {
-    var s = SOURCE[src] || SOURCE.reported;
-    return '<span class="badge ' + s.cls + '">' + s.label + '</span>';
+  function ago(ms) {
+    var s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.round(s / 60) + 'm ago';
+    if (s < 86400) return Math.round(s / 3600) + 'h ago';
+    var d = Math.round(s / 86400); return d + (d === 1 ? ' day ago' : ' days ago');
   }
-  function tile(ticker) { return '<div class="tile" aria-hidden="true">' + esc(ticker.slice(0, 4)) + '</div>'; }
-
-  /* ---------- research the reasons lean on (each one linked) ---------- */
-  var RESEARCH = {
-    contrarian: { text: 'Research summary: insiders tend to buy after their stock has fallen, and act as contrarians with better information.',
-                  label: 'Interactive Brokers: academic evidence on insider buying',
-                  url: 'https://www.interactivebrokers.com/campus/traders-insight/securities/stocks/what-corporate-insider-buying-can-tell-investors-evidence-from-academic-research/' },
-    cluster:    { text: 'One study found purchases by several insiders at once earned about twice the 21-day abnormal return of single purchases (3.8% vs 2%).',
-                  label: 'Study on cluster insider trades (PDF)', url: 'https://journal.tinkoff.ru/media/insider-pdf-002.pdf' }
+  function daysApart(a, b) { return Math.round((parseDay(b) - parseDay(a)) / 864e5); }
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   };
-
-  function fmtPrice(v) { return v == null ? '—' : '$' + (v >= 1 ? v.toFixed(2) : v.toFixed(3)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
-  function srcOf(t) { return (t.sources && t.sources[0]) || (t.url ? { label: 'SEC Form 4 filing', url: t.url } : null); }
-  function daysApart(a, b) { return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 864e5); }
-
-  /* Possible reasons. Each has: text (the idea), how (the numbers behind it), src (where they came from),
-     and optionally research (a published finding that supports reading it this way). */
-  function reasons(t) {
-    var out = [];
-    if (/return|new\b|interim|appointed|incoming/i.test(t.title || '')) {
-      out.push({ text: 'Possibly to show commitment as a new or returning CEO.',
-                 how: 'Their title in our data is "' + esc(t.title) + '".', src: srcOf(t) });
-    }
-    if (t.dip && t.dip.pct >= 20) {
-      var how = t.dip.how ? esc(t.dip.how) : '', s = window.INSIDER_PRICES && window.INSIDER_PRICES[t.ticker], dsrc = t.dip.src;
-      if (!how && s && t.price) { // work it out from daily closes
-        var td = Math.round(parseDay(t.date).getTime() / 864e5), pk = -1, pd = null;
-        for (var i = 0; i < s.d.length; i++) if (s.d[i] >= td - 90 && s.d[i] <= td && s.c[i] > pk) { pk = s.c[i]; pd = s.d[i]; }
-        if (pk > 0) {
-          how = 'Paid ' + fmtPrice(t.price) + '. Highest close in the 90 days before was ' + fmtPrice(pk) + ' on ' +
-            dayLabel(new Date(pd * 864e5).toISOString().slice(0, 10), true) + '.';
-          dsrc = { label: 'Daily closes: ' + (s.s || 'price feed'), url: 'https://finance.yahoo.com/quote/' + encodeURIComponent(t.ticker) + '/history' };
-        }
-      }
-      out.push({ text: 'Bought after a big drop: ' + t.dip.pct + '% below the ' + esc(t.dip.base || 'recent peak') + '. The CEO may think the stock is now too cheap.',
-                 how: how, src: dsrc, research: RESEARCH.contrarian });
-    }
-    var mine = TRADES.filter(function (x) { return x.ticker === t.ticker && x.insider === t.insider && x.date < t.date; })
-      .sort(function (a, b) { return a.date < b.date ? 1 : -1; });
-    if (mine.length) {
-      var prev = mine[0], lower = prev.price && t.price && t.price < prev.price;
-      out.push({ text: 'Came back for more, ' + daysApart(prev.date, t.date) + ' days after the last buy' +
-                 (lower ? ', at a lower price. That can mean conviction, or averaging down on a losing position.' : '.'),
-                 how: 'Earlier buy: ' + dayLabel(prev.date, true) + ', ' + money(prev.value) + ' at ' + fmtPrice(prev.price) + '.', src: srcOf(prev) });
-    }
-    var others = TRADES.filter(function (x) { return x.ticker === t.ticker && x.insider !== t.insider; })
-      .map(function (x) { return esc(x.insider) + ' on ' + dayLabel(x.date); }).concat((t.also || []).map(esc));
-    if (others.length) {
-      out.push({ text: 'Other insiders bought the same stock around the same time.',
-                 how: 'Also buying: ' + others.join('; ') + '.', src: srcOf(t), research: RESEARCH.cluster });
-    }
-    if (t.value >= 25e4) {
-      out.push({ text: (t.value >= 1e6 ? 'A large' : 'A meaningful') + ' personal bet of ' + money(t.value) + '.',
-                 how: t.shares && t.price ? num(t.shares) + ' shares × ' + fmtPrice(t.price) + ' = ' + money(t.shares * t.price) + '.'
-                                         : 'Dollar value as reported by the source.', src: srcOf(t) });
-    }
-    if (!out.length) {
-      out.push({ text: 'No clear trigger in the data.',
-                 how: 'None of our checks matched: no drop of 20% or more, no repeat buy, no other insiders buying, and under $250K.', src: null });
-    }
-    return out;
+  function loadScript(src) {
+    return new Promise(function (ok, fail) {
+      var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = fail; document.body.appendChild(s);
+    });
+  }
+  var AV = ['#3b6fb6', '#2f8f6b', '#8e5bc4', '#b7652c', '#2f8a9a', '#a84a6a', '#6f7d2f', '#5b63c4'];
+  function initials(name) {
+    var p = String(name || '?').trim().split(/\s+/);
+    return (p[0][0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+  }
+  function avatar(name) {
+    var h = 0; for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return '<span class="av" style="--av:' + AV[h % AV.length] + '" aria-hidden="true">' + esc(initials(name)) + '</span>';
   }
   function srcLink(s) {
     return s && s.url ? '<a class="src" href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.label) + '</a>' : '';
   }
-  function reasonsHtml(t) {
-    var warn = t.source === 'screenshot' ? '<p class="warn">These reasons use unverified numbers from a screenshot.</p>' : '';
-    return warn + '<ol class="reasons">' + reasons(t).map(function (r) {
-      return '<li><div class="reason__t">' + r.text + '</div>' +
-        (r.how ? '<div class="reason__how"><span>How we know:</span> ' + r.how + '</div>' : '') +
-        (r.src ? '<div class="reason__src"><span>Source:</span> ' + srcLink(r.src) + '</div>' : '') +
-        (r.research ? '<div class="reason__res">' + esc(r.research.text) + ' ' + srcLink(r.research) + '</div>' : '') +
-        '</li>';
-    }).join('') + '</ol>';
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 3600);
   }
 
-  /* ---------- card ---------- */
-  function filedText(t) {
-    if (t.filedAt) {
-      return new Date(t.filedAt).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET';
-    }
-    return t.filedOn ? dayLabel(t.filedOn, true) : 'Not known';
+  /* Rolling numbers: $11 -> $12 -> $20 instead of jumping */
+  function parseNum(text) {
+    var m = String(text).match(/^([^\d\-−+]*)([\-−+]?)([\d,]*\.?\d+)(.*)$/);
+    if (!m) return null;
+    return { pre: m[1], plus: m[2] === '+', neg: m[2] === '-' || m[2] === '−', v: parseFloat(m[3].replace(/,/g, '')),
+             dec: (m[3].split('.')[1] || '').length, suf: m[4], comma: m[3].indexOf(',') >= 0 };
   }
-  function card(t, opts) {
-    opts = opts || {};
-    var dip = t.dip && t.dip.pct != null ? t.dip : null;
-    var filedIso = t.filedAt ? t.filedAt.slice(0, 10) : t.filedOn;
-    var lag = filedIso ? daysApart(t.date, filedIso) : null;
-    var head = '<p class="headline"><strong>' + esc(t.insider) + '</strong>, ' + esc(roleOf(t)) + ' of ' + esc(t.company) +
-      ', bought <strong>' + money(t.value) + '</strong> of stock' + (t.price != null ? ' at ' + price(t) + ' a share' : '') + '.</p>';
-    var facts = [
-      ['Bought on', dayLabel(t.date, true)],
-      ['Filed with SEC', filedText(t) + (lag != null ? '<small>' + (lag === 0 ? 'same day' : lag + (lag === 1 ? ' day' : ' days') + ' later') + '</small>' : '')],
-      ['Shares', t.shares ? num(t.shares) : 'Not reported'],
-      ['Price paid', price(t) + (t.approxPrice ? '<small>worked out from value ÷ shares</small>' : '')]
+  function roll(el, text, ms) {
+    if (!el) return;
+    var p = parseNum(text);
+    if (!p || REDUCED) { el.textContent = text; return; }
+    var to = p.neg ? -p.v : p.v, from = el._v == null ? 0 : el._v, t0 = performance.now(), dur = ms || 600;
+    el._v = to; cancelAnimationFrame(el._raf);
+    (function step(now) {
+      var k = Math.max(0, Math.min(1, (now - t0) / dur)), e = 1 - Math.pow(1 - k, 3), v = from + (to - from) * e;
+      var s = Math.abs(v).toFixed(p.dec);
+      if (p.comma) s = s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      el.textContent = k < 1 ? p.pre + (v < 0 ? '−' : p.plus ? '+' : '') + s + p.suf : text;
+      if (k < 1) el._raf = requestAnimationFrame(step);
+    })(t0);
+  }
+
+  /* =================== data =================== */
+  var DATA = window.INSIDER_DATA || { trades: [] };
+  var TRADES = (DATA.trades || []).filter(function (t) { return t && t.ticker && t.date && t.type !== 'sell'; });
+  if (TRADES.some(function (t) { return t.source === 'sec'; })) TRADES = TRADES.filter(function (t) { return t.source === 'sec'; });
+  var SPARK = window.INSIDER_SPARK || {};
+  var COMPANIES = null; // filled on demand
+
+  function quote(tk) {
+    var s = SPARK[tk];
+    if (!s || !s.last) return null;
+    return { last: s.last, chg: s.prev ? (s.last / s.prev - 1) * 100 : 0, hi: s.hi, lo: s.lo, asof: s.asof };
+  }
+  function filedMs(t) { return t.filedAt ? Date.parse(t.filedAt) : Date.parse(t.date + 'T21:00:00Z'); }
+  function since(t) { var q = quote(t.ticker); return q && t.price ? (q.last / t.price - 1) * 100 : null; }
+  function stakePct(t) {
+    if (t.ownedAfter == null || !t.shares) return null;
+    var before = t.ownedAfter - t.shares;
+    return before <= 0 ? Infinity : t.shares / before * 100;
+  }
+
+  /* =================== conviction score =================== */
+  var RES = {
+    contrarian: { label: 'Research: insiders tend to buy after drops', url: 'https://www.interactivebrokers.com/campus/traders-insight/securities/stocks/what-corporate-insider-buying-can-tell-investors-evidence-from-academic-research/' },
+    cluster: { label: 'Study: cluster buys earned ~2x single buys', url: 'https://journal.tinkoff.ru/media/insider-pdf-002.pdf' },
+    unusual: { label: 'NBER: unusual trades carry the signal', url: 'https://www.nber.org/papers/w16454.pdf' },
+    plan: { label: 'SEC: Rule 10b5-1 trading plans', url: 'https://www.sec.gov/newsroom/press-releases/2022-222' }
+  };
+  function filingSrc(t) { return t.url ? { label: 'SEC Form 4', url: t.url } : (t.sources && t.sources[0]) || null; }
+  function score(t) {
+    if (t._score) return t._score;
+    var parts = [], src = filingSrc(t);
+    // 1. Size (0-25), log scale: $25K = 0, $1M = 17, $5M+ = 25
+    var size = Math.max(0, Math.min(25, Math.round((Math.log10(Math.max(t.value, 1)) - Math.log10(25000)) / (Math.log10(5e6) - Math.log10(25000)) * 25)));
+    parts.push({ pts: size, max: 25, t: 'Size: ' + money(t.value) + ' of their own money',
+      how: t.shares && t.price ? num(t.shares) + ' shares × ' + p2(t.price) + '. Scored on a scale where $25K = 0 and $5M or more = 25.' : 'Scored on a scale where $25K = 0 and $5M or more = 25.', src: src });
+    // 2. Stake growth (0-25)
+    var sp = stakePct(t), st = 0;
+    if (sp === Infinity) st = 20; else if (sp != null) st = sp >= 100 ? 25 : sp >= 50 ? 20 : sp >= 20 ? 14 : sp >= 10 ? 9 : sp >= 3 ? 4 : 0;
+    parts.push({ pts: st, max: 25, na: sp == null, t: sp == null ? 'Stake growth: not in this filing' : sp === Infinity ? 'Stake growth: a brand-new position' : 'Stake growth: +' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% more shares',
+      how: sp == null ? 'Older rows lack the "shares owned after" figure. The next update adds it.' : 'Owned ' + num(t.ownedAfter) + ' shares directly after the buy, up from ' + num(t.ownedAfter - t.shares) + '. Doubling a stake matters more than adding 1%.', src: sp == null ? null : src });
+    // 3. Drop before the buy (0-20)
+    var dp = t.dip && t.dip.pct, dpts = dp >= 40 ? 20 : dp >= 25 ? 14 : dp >= 15 ? 8 : dp >= 8 ? 4 : 0;
+    parts.push({ pts: dpts, max: 20, na: dp == null, t: dp != null ? 'Bought ' + dp + '% below the ' + (t.dip.base || 'recent peak') : 'Drop before the buy: unknown',
+      how: dp != null ? 'Price paid ' + p2(t.price) + ' compared with the highest close in the 90 days before.' : 'No price history for this ticker yet.',
+      src: dp != null ? { label: 'Daily closes (' + ((SPARK[t.ticker] || {}).s || 'price feed') + ')', url: 'https://finance.yahoo.com/quote/' + encodeURIComponent(t.ticker) + '/history' } : null, res: dpts ? RES.contrarian : null });
+    // 4. Other insiders / coming back (0-20)
+    var others = {}, again = 0;
+    TRADES.forEach(function (x) {
+      if (x.ticker !== t.ticker || x === t || Math.abs(daysApart(x.date, t.date)) > 30) return;
+      if (x.insider === t.insider) again++; else others[x.insider] = x.date;
+    });
+    var on = Object.keys(others), cpts = Math.min(20, (on.length >= 2 ? 15 : on.length ? 10 : 0) + (again ? 5 : 0));
+    parts.push({ pts: cpts, max: 20, t: on.length ? on.length + ' other insider' + (on.length > 1 ? 's' : '') + ' bought within 30 days' + (again ? ', and the CEO bought more than once' : '') : again ? 'The CEO bought more than once within 30 days' : 'No other insider buys nearby',
+      how: on.length ? on.map(function (n) { return esc(n) + ' (' + day(others[n]) + ')'; }).join(', ') : 'Checked every buy at this company within 30 days either side.', src: null, res: on.length ? RES.cluster : null });
+    // 5. Unusual: first buy in a year (0-10)
+    var upts = t.prior12 == null ? 0 : t.prior12 === 0 ? 10 : t.prior12 >= 4 ? 0 : 4;
+    parts.push({ pts: upts, max: 10, na: t.prior12 == null, t: t.prior12 == null ? 'Buying history: arrives with the nightly update' : t.prior12 === 0 ? 'First CEO buy here in 12 months' : t.prior12 + ' earlier CEO buy' + (t.prior12 > 1 ? 's' : '') + ' in the last 12 months',
+      how: t.prior12 == null ? 'Needs the 12-month filing history, which the daily update collects.' : 'Counted from every Form 4 filed for this company in the past year.', src: null, res: t.prior12 === 0 ? RES.unusual : null });
+    // 6. Pre-planned (minus 15)
+    if (t.plan) parts.push({ pts: -15, t: 'Pre-scheduled under a 10b5-1 plan', how: 'The filer ticked the 10b5-1 box, so the buy was arranged in advance, not decided this week.', src: src, res: RES.plan });
+    // Factors we can't check yet are left out, and the rest is scaled to 100, so missing data never drags a score down.
+    var raw = parts.reduce(function (a, p) { return a + (p.na ? 0 : p.pts); }, 0);
+    var max = parts.reduce(function (a, p) { return a + (p.na || !p.max ? 0 : p.max); }, 0) || 100;
+    var known = parts.filter(function (p) { return p.max && !p.na; }).length;
+    var total = Math.max(0, Math.min(100, Math.round(raw / max * 100)));
+    return (t._score = { total: total, parts: parts, known: known, raw: raw, max: max, tier: total >= 60 ? 'hi' : total >= 35 ? 'mid' : 'lo' });
+  }
+
+  /* =================== state =================== */
+  var WATCH = store.get('cib_watch', []);
+  var LAST_SEEN = store.get('cib_seen', null);          // ms of the newest filing the person has seen
+  var NOTIFY = store.get('cib_notify', false);
+  var st = { q: '', f: 'all', sort: 'new', limit: 40, open: {} };
+  var freshIds = {};
+
+  function newest() { return TRADES.reduce(function (m, t) { return Math.max(m, filedMs(t)); }, 0); }
+  function isNew(t) { return LAST_SEEN != null && filedMs(t) > LAST_SEEN; }
+  if (LAST_SEEN == null) LAST_SEEN = Date.now() - 2 * 864e5; // first visit: the last 2 days count as new
+  var seenTimer = setTimeout(function () { store.set('cib_seen', Math.max(newest(), LAST_SEEN)); }, 6000);
+
+  /* =================== CEO feed =================== */
+  var FILTERS = [
+    ['all', 'All'], ['hi', 'High conviction'], ['watch', 'Watchlist'], ['dip', 'Bought the dip'],
+    ['cluster', 'Several insiders'], ['big', '$1M+'], ['first', 'First in a year']
+  ];
+  function passes(t) {
+    var s = score(t);
+    switch (st.f) {
+      case 'hi': return s.total >= 60;
+      case 'watch': return WATCH.indexOf(t.ticker) >= 0;
+      case 'dip': return t.dip && t.dip.pct >= 25;
+      case 'cluster': return s.parts[3].pts >= 10;
+      case 'big': return t.value >= 1e6;
+      case 'first': return t.prior12 === 0;
+    }
+    return true;
+  }
+  function matches(t) {
+    if (!st.q) return true;
+    var q = st.q.toLowerCase();
+    return (t.ticker + ' ' + t.company + ' ' + t.insider).toLowerCase().indexOf(q) >= 0;
+  }
+  function sorted(list) {
+    var by = {
+      'new': function (a, b) { return filedMs(b) - filedMs(a) || b.value - a.value; },
+      score: function (a, b) { return score(b).total - score(a).total || filedMs(b) - filedMs(a); },
+      value: function (a, b) { return b.value - a.value; },
+      dip: function (a, b) { return ((b.dip && b.dip.pct) || -1) - ((a.dip && a.dip.pct) || -1); }
+    }[st.sort];
+    return list.slice().sort(by);
+  }
+  function renderFilters() {
+    var counts = {}; FILTERS.forEach(function (f) { var o = st.f; st.f = f[0]; counts[f[0]] = TRADES.filter(passes).length; st.f = o; });
+    $('filters').innerHTML = FILTERS.map(function (f) {
+      if (f[0] === 'first' && !TRADES.some(function (t) { return t.prior12 != null; })) return '';
+      return '<button type="button" class="chip' + (st.f === f[0] ? ' is-on' : '') + '" data-f="' + f[0] + '" aria-pressed="' + (st.f === f[0]) + '">' +
+        f[1] + ' <span class="n">' + counts[f[0]] + '</span></button>';
+    }).join('') + '<button type="button" class="chip chip--bell' + (NOTIFY ? ' is-on' : '') + '" id="bell" aria-pressed="' + NOTIFY + '">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>' +
+      (NOTIFY ? 'Alerts on' : 'Get alerts') + '</button>';
+  }
+  function quoteHtml(tk) {
+    var q = quote(tk);
+    return q ? '<span class="q ' + (q.chg >= 0 ? 'pos' : 'neg') + '">' + p2(q.last) + ' ' + (q.chg >= 0 ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</span>' : '';
+  }
+  function rowHtml(t) {
+    var s = score(t), sp = stakePct(t), w = WATCH.indexOf(t.ticker) >= 0, open = !!st.open[t.id];
+    var stake = t.plan ? '<span class="row__stake plan">Pre-planned</span>'
+      : sp === Infinity ? '<span class="row__stake">New position</span>'
+      : sp != null && sp >= 1 ? '<span class="row__stake">+' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% stake</span>' : '';
+    return '<article class="row' + (open ? ' is-open' : '') + (isNew(t) ? ' is-new' : '') + (freshIds[t.id] ? ' fresh' : '') + '" data-id="' + esc(t.id) + '">' +
+      '<button type="button" class="row__head" aria-expanded="' + open + '" aria-controls="b-' + esc(t.id) + '">' +
+      '<span class="ring ring--' + s.tier + '" style="--p:' + s.total + '" title="Conviction score ' + s.total + ' of 100"><span>' + s.total + '</span></span>' +
+      '<span class="row__main"><span class="row__l1"><span class="row__co">' + esc(t.company) + '</span><span class="tk">' + esc(t.ticker) + '</span>' + (w ? '<span class="star" title="On your watchlist">★</span>' : '') + '</span>' +
+      '<span class="row__l2"><span>' + esc(t.insider) + '</span><span class="row__time">' + (t.filedAt ? 'Filed ' + ago(filedMs(t)) : 'Bought ' + day(t.date)) + '</span>' + stake + '</span></span>' +
+      '<span class="row__right"><span class="row__amt">' + money(t.value) + '</span>' + quoteHtml(t.ticker) + '</span></button>' +
+      '<div class="row__body" id="b-' + esc(t.id) + '"><div class="row__inner">' + (open ? bodyHtml(t) : '') + '</div></div></article>';
+  }
+  function renderFeed() {
+    var list = sorted(TRADES.filter(function (t) { return passes(t) && matches(t); }));
+    var shown = list.slice(0, st.limit), html = '', dividerDone = false, anyNew = false;
+    shown.forEach(function (t) {
+      if (st.sort === 'new' && !st.q) {
+        if (isNew(t) && !anyNew) {
+          anyNew = true;
+          html += '<div class="divider">New since your last visit · ' + list.filter(isNew).length + '</div>';
+        } else if (anyNew && !isNew(t) && !dividerDone) {
+          dividerDone = true; html += '<div class="divider divider--old">Earlier</div>';
+        }
+      }
+      html += rowHtml(t);
+    });
+    $('feed').innerHTML = html || '<div class="empty">' + (st.f === 'watch' ? 'Star a company (open any buy) to add it to your watchlist.' : 'No buys match.') + '</div>';
+    $('more').hidden = list.length <= st.limit;
+    $('more').textContent = 'Show ' + Math.min(40, list.length - st.limit) + ' more';
+    freshIds = {};
+  }
+  function renderSummary() {
+    var total = TRADES.reduce(function (a, t) { return a + t.value; }, 0), cos = {};
+    TRADES.forEach(function (t) { cos[t.ticker] = 1; });
+    var hi = TRADES.filter(function (t) { return score(t).total >= 60; }).length;
+    var span = TRADES.length ? daysApart(TRADES.reduce(function (m, t) { return t.date < m ? t.date : m; }, TRADES[0].date), new Date().toISOString().slice(0, 10)) : 0;
+    $('summary').innerHTML = '<b id="s1"></b> CEO buys in ' + span + ' days · <b id="s2"></b> in total · <b id="s3"></b> companies · <b id="s4"></b> high conviction';
+    roll($('s1'), String(TRADES.length), 800); roll($('s2'), money(total), 900); roll($('s3'), String(Object.keys(cos).length), 800); roll($('s4'), String(hi), 800);
+  }
+
+  /* expanded row */
+  function miniChart(t) {
+    var s = SPARK[t.ticker];
+    if (!s || !s.c || s.c.length < 3) return '<p class="fine">No price history for ' + esc(t.ticker) + ' yet.</p>';
+    var n = s.c.length, lo = Math.min.apply(null, s.c), hi = Math.max.apply(null, s.c), W = 300, H = 64;
+    if (t.price) { lo = Math.min(lo, t.price); hi = Math.max(hi, t.price); }
+    function X(i) { return 2 + i / (n - 1) * (W - 4); }
+    function Y(v) { return 4 + (1 - (v - lo) / ((hi - lo) || 1)) * (H - 8); }
+    var d = s.c.map(function (v, i) { return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); }).join('');
+    var te = epoch(t.date) - s.d0, k = -1;
+    s.o.forEach(function (o, i) { if (o <= te) k = i; });
+    var mk = k >= 0 && te >= 0 ? '<circle class="mini__m" cx="' + X(k).toFixed(1) + '" cy="' + Y(s.c[k]).toFixed(1) + '" r="4"/>' : '';
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' + esc(t.ticker) + ' last two months, buy marked">' +
+      '<path class="mini__l ' + (s.c[n - 1] >= s.c[0] ? 'up' : 'dn') + '" d="' + d + '"/>' + mk + '</svg>';
+  }
+  function bodyHtml(t) {
+    var s = score(t), sp = stakePct(t), sb = since(t), q = quote(t.ticker), lag = t.filedAt ? daysApart(t.date, t.filedAt.slice(0, 10)) : null;
+    var kv = [
+      ['Bought on', day(t.date, true), ''],
+      ['Filed with SEC', t.filedAt ? et(t.filedAt) : '—', lag != null ? (lag === 0 ? 'same day' : lag + (lag === 1 ? ' day' : ' days') + ' after the trade') : ''],
+      ['Price paid', p2(t.price), t.shares ? num(t.shares) + ' shares' : ''],
+      ['Stake after', t.ownedAfter != null ? num(t.ownedAfter) + ' sh' : '—', sp === Infinity ? 'new position' : sp != null ? '+' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% from this buy' : 'arrives with next update'],
+      ['Fell before buy', t.dip ? '<span class="neg">−' + t.dip.pct + '%</span>' : '—', t.dip ? 'vs ' + esc(t.dip.base) : ''],
+      ['Since the buy', sb != null ? '<span class="' + (sb < 0 ? 'neg' : 'pos') + '">' + signPct(sb) + '</span>' : '—', q ? 'last close ' + p2(q.last) : ''],
+      ['52-week range', q && q.lo ? p2(q.lo) + ' – ' + p2(q.hi) : '—', ''],
+      ['Pre-planned?', t.plan ? 'Yes (10b5-1)' : t.plan === false ? 'No' : '—', t.plan === false ? 'decided, not scheduled' : '']
     ];
-    if (dip) facts.push(['Fallen from high', '<span class="neg">&minus;' + dip.pct + '%</span><small>vs ' + esc(dip.base || 'peak') + '</small>']);
-    if (t.sinceBought != null) facts.push(['Stock since then', '<span class="' + (t.sinceBought < 0 ? 'neg' : 'pos') + '">' +
-      (t.sinceBought < 0 ? '&minus;' : '+') + Math.abs(t.sinceBought).toFixed(1) + '%</span>']);
-    var grid = '<dl class="facts-grid">' + facts.map(function (f) { return '<div><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>'; }).join('') + '</dl>';
-
-    var extra = '';
-    if (t.also && t.also.length) extra += '<p class="card__also">Also: ' + t.also.map(esc).join('; ') + '</p>';
-    if (t.note) extra += '<p class="card__note">' + esc(t.note) + '</p>';
-    var n = reasons(t).length;
-    extra += '<details class="why-d"><summary>Possible reasons (' + n + '), our guesses, with sources</summary>' + reasonsHtml(t) + '</details>';
-    var srcs = (t.sources || []).map(srcLink).join('');
-    extra += '<div class="srcs"><span>Sources:</span> ' + (srcs || '<em>none, unverified</em>') + '</div>';
-
-    if (opts.body) {
-      return head + grid + extra + '<div class="rowc__acts"><button type="button" class="card__btn" data-id="' + esc(t.id) +
-        '">Price chart</button></div>';
+    var w = WATCH.indexOf(t.ticker) >= 0;
+    return '<div class="row__pad">' +
+      '<p class="headline">' + avatar(t.insider) + '<strong>' + esc(t.insider) + '</strong>, ' + esc(t.title) + ', bought <strong>' + money(t.value) +
+      '</strong> of ' + esc(t.company) + ' stock' + (t.price ? ' at ' + p2(t.price) + ' a share' : '') + '.</p>' +
+      '<dl class="kv">' + kv.map(function (k) { return '<div><dt>' + k[0] + '</dt><dd>' + k[1] + (k[2] ? '<small>' + k[2] + '</small>' : '') + '</dd></div>'; }).join('') + '</dl>' +
+      '<div class="mini">' + miniChart(t) + '<div style="display:grid;gap:8px">' +
+      '<button type="button" class="btn btn--fill" data-chart="' + esc(t.id) + '">Full chart</button>' +
+      '<button type="button" class="btn btn--soft" data-watch="' + esc(t.ticker) + '" aria-pressed="' + w + '">' + (w ? '★ Watching' : '☆ Watch') + '</button></div></div>' +
+      '<details class="more-d" data-more="' + esc(t.id) + '"><summary>Know more <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>' +
+      '<div class="more-d__body" id="m-' + esc(t.id) + '"></div></details></div>';
+  }
+  function knowMoreHtml(t) {
+    var s = score(t), co = COMPANIES && COMPANIES[t.ticker], q = quote(t.ticker), html = '';
+    html += '<div><div class="sub-h">Why it scores ' + s.total + ' / 100</div><ul class="score-list">' + s.parts.map(function (p) {
+      return '<li><span class="pts' + (p.na || p.pts === 0 ? ' zero' : p.pts < 0 ? ' minus' : '') + '">' + (p.na ? '–' : (p.pts > 0 ? '+' : '') + p.pts) + '</span><div>' +
+        '<div class="why__t">' + esc(p.t) + '</div><div class="why__how">' + p.how + '</div>' +
+        (p.src || p.res ? '<div class="why__src">' + (p.src ? 'Source: ' + srcLink(p.src) : '') + (p.res ? srcLink(p.res) : '') + '</div>' : '') + '</div></li>';
+    }).join('') + '</ul><p class="fine" style="margin-top:8px">' + (s.known < 5 ? 'Scored on ' + s.known + ' of 5 factors (' + s.raw + ' of ' + s.max + ' possible points, scaled to 100). Factors marked – aren\'t counted yet. ' : '') + 'Our own formula from facts in the filing. Not yet proven to predict returns: see Track record.</p></div>';
+    html += '<div><div class="sub-h">The company</div>';
+    if (co) {
+      var cap = co.sharesOut && q ? co.sharesOut * q.last : null;
+      html += '<dl class="kv">' +
+        '<div><dt>Industry</dt><dd style="font-size:.875rem">' + esc(co.industry || '—') + '</dd></div>' +
+        '<div><dt>Exchange</dt><dd>' + esc(co.exchange || '—') + '</dd></div>' +
+        '<div><dt>Company value</dt><dd>' + (cap ? money(cap) : '—') + '<small>' + (cap ? num(co.sharesOut) + ' shares × last close' : 'shares outstanding not reported') + '</small></dd></div>' +
+        '<div><dt>This buy is</dt><dd>' + (cap ? (t.value / cap * 100 < 0.01 ? '<0.01' : (t.value / cap * 100).toFixed(2)) + '%' : '—') + '<small>of the company\'s value</small></dd></div></dl>';
+      html += '<p class="why__src">Source: ' + srcLink({ label: 'SEC company profile', url: 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + co.cik }) + '</p>';
+    } else {
+      html += '<p class="fine">' + (COMPANIES ? 'No company details for ' + esc(t.ticker) + ' yet. They arrive with the nightly update.' : 'Loading…') + '</p>';
     }
-    return '<article class="card">' +
-      '<div class="card__head">' +
-      '<div class="card__id"><div class="card__ticker">' + esc(t.company) + ' <span class="tk">' + esc(t.ticker) + '</span></div>' +
-      '<div class="card__co">' + badge(t.source) + (t.exchange ? ' · ' + esc(t.exchange) : '') + '</div></div>' +
-      '<button type="button" class="card__btn" data-id="' + esc(t.id) + '" aria-label="Price chart for ' + esc(t.ticker) + '">Chart</button></div>' +
-      head + grid + extra + '</article>';
+    html += '</div><div><div class="sub-h">CEO trades at ' + esc(t.ticker) + ', last 12 months</div>';
+    var hist = co && co.history ? co.history : TRADES.filter(function (x) { return x.ticker === t.ticker; }).map(function (x) {
+      return { date: x.date, type: 'buy', value: x.value, price: x.price, insider: x.insider, url: x.url, plan: x.plan };
+    });
+    hist = hist.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    var buys = hist.filter(function (h) { return h.type === 'buy'; }).length, sells = hist.length - buys;
+    html += '<p class="fine" style="margin-bottom:8px">' + buys + ' buy' + (buys === 1 ? '' : 's') + ' and ' + sells + ' sale' + (sells === 1 ? '' : 's') +
+      (co ? '' : ' in our ' + (DATA.coverage ? 'current window' : 'data') + ' (full year arrives with the nightly update)') +
+      (sells > buys ? '. Note: more selling than buying this year.' : '') + '</p><div class="hist">' + hist.slice(0, 8).map(function (h) {
+        return '<div class="hist__r"><span class="pill pill--' + h.type + '">' + (h.type === 'buy' ? 'Buy' : 'Sell') + '</span>' +
+          '<span>' + day(h.date, true) + ' · ' + esc(h.insider) + (h.plan ? ' <span class="badge badge--plan">10b5-1</span>' : '') +
+          (h.r30 != null ? ' <span class="' + (h.r30 < 0 ? 'neg' : 'pos') + '">' + signPct(h.r30) + ' after 30d</span>' : '') + '</span>' +
+          '<span>' + (h.url ? '<a class="src" style="margin:0" href="' + esc(h.url) + '" target="_blank" rel="noopener noreferrer">' + money(h.value) + '</a>' : money(h.value)) + '</span></div>';
+      }).join('') + '</div></div>';
+    html += '<div><div class="sub-h">Sources</div>' + (t.sources || []).map(srcLink).join('') +
+      srcLink({ label: 'All ' + t.ticker + ' insider filings', url: 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + encodeURIComponent(co && co.cik || t.ticker) + '&type=4&dateb=&owner=include&count=40' }) + '</div>';
+    return html;
   }
-  function roleOf(t) {
-    var s = (t.title || '').toLowerCase();
-    return /chief executive|ceo/.test(s) ? 'CEO' : (t.title || 'Exec');
+  function ensureCompanies() {
+    if (COMPANIES || ensureCompanies._p) return ensureCompanies._p || Promise.resolve();
+    ensureCompanies._p = loadScript('companies.js').then(function () {
+      COMPANIES = (window.INSIDER_COMPANIES || {}).data || {};
+    }).catch(function () { COMPANIES = {}; });
+    return ensureCompanies._p;
+  }
+  function toggleRow(id) {
+    var el = document.querySelector('.row[data-id="' + CSS.escape(id) + '"]');
+    if (!el) return;
+    var t = byId(id), open = !el.classList.contains('is-open');
+    st.open[id] = open;
+    if (open && !el.querySelector('.row__pad')) el.querySelector('.row__inner').innerHTML = bodyHtml(t);
+    requestAnimationFrame(function () {
+      el.classList.toggle('is-open', open);
+      el.querySelector('.row__head').setAttribute('aria-expanded', String(open));
+    });
+  }
+  function byId(id) { return TRADES.filter(function (t) { return t.id === id; })[0]; }
+
+  /* track record */
+  function renderTrack() {
+    var done = TRADES.filter(function (t) { return t.r30 != null; });
+    if (COMPANIES) Object.keys(COMPANIES).forEach(function (k) {
+      (COMPANIES[k].history || []).forEach(function (h) { if (h.type === 'buy' && h.r30 != null && !TRADES.some(function (t) { return t.ticker === k && t.date === h.date; })) done.push(h); });
+    });
+    var el = $('track');
+    if (done.length < 8) {
+      el.innerHTML = '<h2 id="track-h">Track record</h2><p class="fine">Do CEO buys actually go up? This fills in as buys turn 30 days old: ' + done.length +
+        ' so far. Every buy is measured from the price the CEO paid, against the S&P 500 (SPY) over the same 30 days.</p>';
+      return;
+    }
+    function med(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[Math.floor(a.length / 2)] : 0; }
+    var r = done.map(function (t) { return t.r30; }), spy = done.filter(function (t) { return t.spy30 != null; }).map(function (t) { return t.spy30; });
+    var winners = r.filter(function (x) { return x > 0; }).length, beat = done.filter(function (t) { return t.spy30 != null && t.r30 > t.spy30; }).length;
+    var hiDone = done.filter(function (t) { return t.ticker && score(t).total >= 60; });
+    var rows = [['All CEO buys', med(r), r.length]];
+    if (hiDone.length >= 3) rows.push(['Conviction 60+', med(hiDone.map(function (t) { return t.r30; })), hiDone.length]);
+    if (spy.length) rows.push(['S&P 500', med(spy), spy.length]);
+    var maxAbs = Math.max.apply(null, rows.map(function (x) { return Math.abs(x[1]); })) || 1;
+    el.innerHTML = '<h2 id="track-h">Track record: 30 days after the buy</h2>' +
+      '<div><span class="big ' + (med(r) >= 0 ? 'pos' : 'neg') + '" id="tr-med"></span> <span class="fine">median move, from the price the CEO paid</span></div>' +
+      '<div class="bars">' + rows.map(function (x) {
+        return '<div class="bar-r"><span>' + x[0] + '</span><span class="bar-t"><span style="width:' + Math.max(3, Math.abs(x[1]) / maxAbs * 100) + '%;background:' + (x[1] >= 0 ? 'var(--green)' : 'var(--red)') + '"></span></span><span class="' + (x[1] >= 0 ? 'pos' : 'neg') + '">' + signPct(x[1]) + '</span></div>';
+      }).join('') + '</div>' +
+      '<p class="fine">' + winners + ' of ' + r.length + ' were up after 30 days' + (spy.length ? ', and ' + beat + ' beat the S&P 500' : '') + '. Past results don\'t guarantee future ones. Small samples swing a lot.</p>';
+    roll($('tr-med'), signPct(med(r)), 900);
   }
 
-  /* ---------- sections ---------- */
-  function renderStats() {
-    var total = sum(VER(), function (t) { return t.value; });
-    var cos = {}; VER().forEach(function (t) { cos[t.ticker] = 1; });
-    $('stats').innerHTML =
-      stat('CEO buys', String(VER().length)) +
-      stat('Total bought', money(total), true) +
-      stat('Companies', String(Object.keys(cos).length));
-    if (!liveText) $('updated').textContent = !DATA.updated ? '' :
-      DATA.updated.length === 10 ? 'Updated ' + dayLabel(DATA.updated, true) : 'Updated ' + stamp(DATA.updated);
-    $('coverage').textContent = DATA.coverage || '';
+  /* ticker tape */
+  function renderTape() {
+    var latest = TRADES.slice().sort(function (a, b) { return filedMs(b) - filedMs(a); }).slice(0, 16);
+    if (!latest.length) { $('tape').hidden = true; return; }
+    var one = latest.map(function (t) {
+      var q = quote(t.ticker);
+      return '<button type="button" class="tick" data-jump="' + esc(t.id) + '"><b>' + esc(t.ticker) + '</b>' + money(t.value) +
+        (q ? ' <span class="' + (q.chg >= 0 ? 'up' : 'dn') + '">' + (q.chg >= 0 ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</span>' : '') + '</button>';
+    }).join('');
+    $('tape-track').innerHTML = one + one.replace(/<button /g, '<button tabindex="-1" aria-hidden="true" ');
+    $('tape').style.setProperty('--tape-dur', Math.max(30, latest.length * 4) + 's');
   }
-  function stat(k, v, green) {
-    return '<div class="stat"><div class="stat__label">' + k + '</div><div class="stat__value' +
-      (green ? ' stat__value--green' : '') + '">' + v + '</div></div>';
+  function jumpTo(id) {
+    st.f = 'all'; st.q = ''; $('q').value = ''; st.sort = 'new'; $('sort').value = 'new';
+    var list = sorted(TRADES), i = list.indexOf(byId(id));
+    st.limit = Math.max(st.limit, i + 5); st.open[id] = true;
+    renderFilters(); renderFeed();
+    var el = document.querySelector('.row[data-id="' + CSS.escape(id) + '"]');
+    if (el) el.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' });
   }
 
-  function groups() {
-    var g = {};
-    VER().forEach(function (t) { (g[t.ticker] = g[t.ticker] || []).push(t); });
-    return Object.keys(g).map(function (k) {
-      var list = g[k].slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-      var also = sum(list, function (t) { return t.also ? t.also.length : 0; });
-      var people = {}; list.forEach(function (t) { people[t.insider] = 1; });
-      return { ticker: k, list: list, buys: list.length, insiders: Object.keys(people).length + also,
-               total: sum(list, function (t) { return t.value; }) };
+  /* =================== live feed (/api/live) =================== */
+  var lastCheck = 0, liveOk = false;
+  function liveLabel() {
+    var el = $('live');
+    el.classList.toggle('is-on', liveOk);
+    $('live-text').textContent = liveOk ? 'Live · ' + ago(lastCheck) : DATA.updated ? 'Updated ' + ago(Date.parse(DATA.updated.length === 10 ? DATA.updated + 'T12:00:00Z' : DATA.updated)) : 'Offline';
+  }
+  function poll() {
+    if (location.protocol.indexOf('http') !== 0) { liveLabel(); return; }
+    fetch('api/live', { cache: 'no-store' }).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (j) {
+      liveOk = true; lastCheck = Date.parse(j.checkedAt) || Date.now();
+      var have = {}; TRADES.forEach(function (t) { have[t.accession || t.id] = 1; have[t.ticker + '|' + t.date + '|' + t.shares] = 1; });
+      var added = (j.trades || []).filter(function (t) {
+        return t && t.ticker && t.date && t.type !== 'sell' && !have[t.accession || t.id] && !have[t.ticker + '|' + t.date + '|' + t.shares];
+      });
+      if (added.length) {
+        added.forEach(function (t) { TRADES.push(t); freshIds[t.id] = 1; });
+        renderSummary(); renderFilters(); renderFeed(); renderTape();
+        var good = added.filter(function (t) { return score(t).total >= 60 || WATCH.indexOf(t.ticker) >= 0; });
+        toast(added.length === 1 ? 'New: ' + added[0].insider + ' bought ' + money(added[0].value) + ' of ' + added[0].ticker : added.length + ' new CEO buys');
+        if (good.length) notify(good);
+        if (document.hidden) document.title = '(' + added.length + ') CEO Insider View';
+      }
+      var l = $('live'); l.classList.remove('ping'); void l.offsetWidth; l.classList.add('ping');
+      liveLabel();
+    }).catch(function () { liveOk = false; liveLabel(); });
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) document.title = 'CEO Insider View'; });
+
+  var swReg = null;
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(function (r) { swReg = r; }).catch(function () {});
+  function notify(list) {
+    if (!NOTIFY || !('Notification' in window) || Notification.permission !== 'granted') return;
+    var title = list.length > 1 ? list.length + ' high-conviction CEO buys' : list[0].ticker + ': CEO bought ' + money(list[0].value);
+    var body = list.slice(0, 3).map(function (t) { return t.insider + ' · ' + t.ticker + ' · score ' + score(t).total; }).join('\n');
+    try { if (swReg && swReg.showNotification) swReg.showNotification(title, { body: body, tag: 'cib' }); else new Notification(title, { body: body }); } catch (e) {}
+  }
+  function toggleBell() {
+    if (NOTIFY) { NOTIFY = false; store.set('cib_notify', false); renderFilters(); toast('Alerts off'); return; }
+    if (!('Notification' in window)) { toast('This browser can\'t show alerts. Use the ntfy app (see README).'); return; }
+    Notification.requestPermission().then(function (p) {
+      NOTIFY = p === 'granted'; store.set('cib_notify', NOTIFY); renderFilters();
+      toast(NOTIFY ? 'Alerts on for conviction 60+ and your watchlist, while this page is open' : 'Alerts are blocked in your browser settings');
     });
   }
 
-  function renderClusters() {
-    var cl = groups().filter(function (g) { return g.buys >= 2 || g.insiders >= 2; })
-      .sort(function (a, b) { return b.total - a.total; });
-    if (!cl.length) { $('clusters').innerHTML = '<div class="empty">No repeat or cluster buys in this window.</div>'; return; }
-    $('clusters').innerHTML = cl.map(function (g) {
-      var first = g.list[0].date, last = g.list[g.list.length - 1].date;
-      var head = g.insiders > 1 ? g.insiders + ' insiders' : g.buys + ' buys';
-      var span = first === last ? dayLabel(first) : dayLabel(first) + ' – ' + dayLabel(last);
-      return '<div class="cluster"><div class="cluster__top">' + tile(g.ticker) +
-        '<div class="cluster__ticker">' + esc(g.ticker) + '</div></div>' +
-        '<div class="cluster__n">' + head + '</div>' +
-        '<div class="cluster__v">' + money(g.total) + '</div>' +
-        '<div class="cluster__s">' + span + '</div></div>';
+  /* =================== chart sheet (drag to dismiss, springs) =================== */
+  // Spring with Apple's two knobs: damping ratio (1 = no bounce) and response (seconds).
+  function spring(from, to, v0, damping, response, onFrame, onDone) {
+    var k = Math.pow(2 * Math.PI / response, 2), c = 4 * Math.PI * damping / response, x = from, v = v0 || 0, last = performance.now(), id;
+    (function step(now) {
+      var dt = Math.max(0, Math.min(0.032, (now - last) / 1000)); last = now;
+      for (var i = 0; i < 2; i++) { var a = -k * (x - to) - c * v; v += a * dt / 2; x += v * dt / 2; }
+      if (Math.abs(x - to) < 1 && Math.abs(v) < 20) { onFrame(to); if (onDone) onDone(); return; }
+      onFrame(x); id = requestAnimationFrame(step);
+    })(last);
+    return function () { cancelAnimationFrame(id); };
+  }
+  function rubberband(over, dim) { var c = 0.55; return (over * dim * c) / (dim + c * Math.abs(over)); }
+  function project(v) { var d = 0.998; return (v / 1000) * d / (1 - d); }
+
+  var sh = { y: 0, h: 600, stop: null, trade: null, range: '6M', lastFocus: null };
+  function setY(y) {
+    sh.y = y;
+    $('sheet-panel').style.transform = 'translateY(' + Math.max(-40, y).toFixed(1) + 'px)';
+    $('scrim').style.opacity = String(Math.max(0, Math.min(1, 1 - y / sh.h)));
+  }
+  function openSheet(t) {
+    sh.trade = t; sh.lastFocus = document.activeElement;
+    $('sheet').hidden = false; document.body.style.overflow = 'hidden';
+    sh.h = $('sheet-panel').offsetHeight || 600;
+    drawSheet();
+    if (sh.stop) sh.stop();
+    if (REDUCED) { setY(0); } else { setY(sh.h); sh.stop = spring(sh.h, 0, 0, 1, 0.42, setY); }
+    $('sh-close').focus();
+  }
+  function closeSheet(v) {
+    if (sh.stop) sh.stop();
+    function done() { $('sheet').hidden = true; document.body.style.overflow = ''; if (sh.lastFocus && sh.lastFocus.focus) sh.lastFocus.focus(); }
+    if (REDUCED) { done(); return; }
+    sh.stop = spring(sh.y, sh.h, v || 0, 1, 0.28, setY, done);
+  }
+  (function dragSheet() {
+    var grab = $('sheet-grab'), startY = 0, y0 = 0, hist = [], dragging = false, pid = null;
+    grab.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('#sh-close')) return;
+      if (sh.stop) sh.stop(); // grab it mid-flight
+      pid = e.pointerId; grab.setPointerCapture(pid); dragging = true;
+      startY = e.clientY; y0 = sh.y; hist = [{ y: e.clientY, t: e.timeStamp }];
+    });
+    grab.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      var ny = y0 + (e.clientY - startY);
+      setY(ny < 0 ? rubberband(ny, sh.h) : ny);
+      hist.push({ y: e.clientY, t: e.timeStamp }); if (hist.length > 6) hist.shift();
+    });
+    function end(e) {
+      if (!dragging) return; dragging = false;
+      var a = hist[0], b = hist[hist.length - 1], v = b && a && b.t > a.t ? (b.y - a.y) / (b.t - a.t) * 1000 : 0;
+      if (sh.y + project(v) > sh.h * 0.4) closeSheet(v);
+      else sh.stop = spring(sh.y, 0, v, Math.abs(v) > 300 ? 0.8 : 1, 0.3, setY);
+    }
+    grab.addEventListener('pointerup', end); grab.addEventListener('pointercancel', end);
+  })();
+  $('scrim').addEventListener('click', function () { closeSheet(0); });
+  $('sh-close').addEventListener('click', function () { closeSheet(0); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(0); });
+
+  var SERIES = {};
+  function getSeries(tk) {
+    if (SERIES[tk]) return Promise.resolve(SERIES[tk]);
+    var name = tk.toUpperCase().replace(/[^A-Z0-9._-]/g, '_');
+    return fetch('prices/' + encodeURIComponent(name) + '.json').then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function (s) { return (SERIES[tk] = { d: s.d, c: s.c, full: true }); })
+      .catch(function () {
+        var s = SPARK[tk];
+        return s ? (SERIES[tk] = { d: s.o.map(function (o) { return s.d0 + o; }), c: s.c, full: false }) : null;
+      });
+  }
+  var RANGES = [['1M', 31], ['3M', 92], ['6M', 183], ['1Y', 366]];
+  function drawSheet() {
+    var t = sh.trade;
+    $('sh-title').textContent = t.ticker + ' · ' + t.company;
+    $('sh-sub').textContent = t.insider + ' bought ' + money(t.value) + (t.price ? ' at ' + p2(t.price) : '') + ' on ' + day(t.date, true);
+    $('sh-ranges').innerHTML = RANGES.map(function (r) {
+      return '<button type="button" class="chip' + (r[0] === sh.range ? ' is-on' : '') + '" data-r="' + r[0] + '" aria-pressed="' + (r[0] === sh.range) + '">' + r[0] + '</button>';
     }).join('');
+    $('sh-chart').innerHTML = '';
+    getSeries(t.ticker).then(function (s) {
+      if (sh.trade !== t) return;
+      if (!s) { $('sh-chart').innerHTML = '<div class="empty">No price history for ' + esc(t.ticker) + ' yet.</div>'; $('sh-readout').innerHTML = ''; $('sh-stats').innerHTML = ''; return; }
+      $('sh-note').textContent = s.full ? '' : 'Showing the last 2 months. Full history loads once the site is online.';
+      chart(t, s);
+    });
   }
-
-  function renderDips() {
-    var d = VER().filter(function (t) { return t.dip && t.dip.pct >= DIP_MIN; })
-      .sort(function (a, b) { return b.dip.pct - a.dip.pct; });
-    $('dips').innerHTML = d.length ? d.map(function (t) { return card(t); }).join('')
-      : '<div class="empty">No dip buys found yet.</div>';
+  function smooth(xs, ys) { // monotone cubic: smooth, never overshoots a real close
+    var n = xs.length, i;
+    if (n < 3) return xs.map(function (x, k) { return (k ? 'L' : 'M') + x.toFixed(1) + ' ' + ys[k].toFixed(1); }).join('');
+    var dx = [], m = [], tg = [];
+    for (i = 0; i < n - 1; i++) { dx[i] = xs[i + 1] - xs[i]; m[i] = (ys[i + 1] - ys[i]) / dx[i]; }
+    tg[0] = m[0]; tg[n - 1] = m[n - 2];
+    for (i = 1; i < n - 1; i++) tg[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+    for (i = 0; i < n - 1; i++) {
+      if (m[i] === 0) { tg[i] = tg[i + 1] = 0; continue; }
+      var a = tg[i] / m[i], b = tg[i + 1] / m[i], h = a * a + b * b;
+      if (h > 9) { var q = 3 / Math.sqrt(h); tg[i] = q * a * m[i]; tg[i + 1] = q * b * m[i]; }
+    }
+    var d = 'M' + xs[0].toFixed(1) + ' ' + ys[0].toFixed(1);
+    for (i = 0; i < n - 1; i++) {
+      var c = dx[i] / 3;
+      d += 'C' + (xs[i] + c).toFixed(1) + ' ' + (ys[i] + c * tg[i]).toFixed(1) + ' ' + (xs[i + 1] - c).toFixed(1) + ' ' + (ys[i + 1] - c * tg[i + 1]).toFixed(1) + ' ' + xs[i + 1].toFixed(1) + ' ' + ys[i + 1].toFixed(1);
+    }
+    return d;
   }
-
-  /* when chart */
-  var measure = 'value', selDay = null;
-  function dayRange() {
-    if (!VER().length) return [];
-    var ds = VER().map(function (t) { return t.date; }).sort();
-    var out = [], d = parseDay(ds[0]), end = parseDay(ds[ds.length - 1]);
-    while (d <= end) { out.push(d.toISOString().slice(0, 10)); d = new Date(d.getTime() + 864e5); }
+  function ticks(lo, hi, n) {
+    var raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var step = [1, 2, 2.5, 5, 10].map(function (f) { return f * mag; }).filter(function (s) { return s >= raw; })[0] || 10 * mag, out = [];
+    for (var v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v * 1e6) / 1e6);
     return out;
   }
-  function renderChart() {
-    var days = dayRange();
-    if (!days.length) { $('chart').innerHTML = ''; return; }
-    var by = {};
-    VER().forEach(function (t) {
-      var b = by[t.date] = by[t.date] || { value: 0, count: 0, list: [] };
-      b.value += t.value || 0; b.count += 1; b.list.push(t);
-    });
-    var max = Math.max.apply(null, days.map(function (d) { return by[d] ? by[d][measure] : 0; })) || 1;
-    if (!selDay || !by[selDay]) {
-      selDay = days.reduce(function (best, d) {
-        return (by[d] && (!best || by[d][measure] > by[best][measure])) ? d : best;
-      }, null);
-    }
-    $('chart').innerHTML = days.map(function (d, i) {
-      var b = by[d], v = b ? b[measure] : 0;
-      var h = v ? Math.max(6, Math.round(Math.sqrt(v / max) * 100)) : 0;
-      var lbl = (i === 0 || d.slice(8) === '01') ? dayLabel(d) : String(parseInt(d.slice(8), 10));
-      var cls = 'col' + (b ? '' : ' col--empty') + (isWeekend(d) ? ' col--weekend' : '') + (d === selDay ? ' is-sel' : '');
-      return '<button type="button" class="' + cls + '" data-d="' + d + '" aria-label="' + dayLabel(d) + ': ' +
-        (b ? b.count + ' buys, ' + money(b.value) : 'no buys') + '">' +
-        '<span class="col__bar" style="height:' + (h * 0.78) + '%"></span><span class="col__lbl">' + lbl + '</span></button>';
-    }).join('');
-    detail(by);
-    Array.prototype.forEach.call($('chart').querySelectorAll('.col'), function (el) {
-      el.addEventListener('click', function () { selDay = el.getAttribute('data-d'); renderChart(); });
-    });
-  }
-  function detail(by) {
-    var b = by[selDay], el = $('chart-detail');
-    if (!b) { el.textContent = 'Tap a bar to see who bought that day.'; return; }
-    var names = b.list.map(function (t) { return esc(t.ticker) + ' (' + money(t.value) + ')'; }).join(', ');
-    var wd = parseDay(selDay).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
-    el.innerHTML = '<strong>' + wd + ', ' + dayLabel(selDay) + '</strong> · ' + b.count +
-      (b.count === 1 ? ' buy' : ' buys') + ', ' + money(b.value) + ': ' + names;
-  }
-
-  function renderWhere() {
-    var g = groups().sort(function (a, b) { return b.total - a.total; }).slice(0, 8);
-    if (!g.length) { $('where').innerHTML = '<div class="empty">Nothing to show yet.</div>'; return; }
-    var max = g[0].total || 1;
-    $('where').innerHTML = g.map(function (x) {
-      var t = x.list[0];
-      return '<div class="wrow"><div class="wrow__top"><div class="wrow__name">' + esc(x.ticker) +
-        ' <small>' + esc(t.company) + (t.exchange ? ' · ' + esc(t.exchange) : '') + '</small></div>' +
-        '<div class="wrow__v">' + money(x.total) + '</div></div>' +
-        '<div class="track"><span style="width:' + Math.max(3, Math.round(x.total / max * 100)) + '%"></span></div></div>';
-    }).join('');
-  }
-
-  /* feed + filters */
-  var state = { sort: 'recent', size: 0, conf: 'all' };
-
-  function renderFeed() {
-    var list = TRADES.filter(function (t) { return (t.value || 0) >= state.size; });
-    if (state.conf === 'verified') {
-      list = list.filter(function (t) { return t.source === 'sec' || t.source === 'confirmed'; });
-    }
-    list.sort(function (a, b) {
-      if (state.sort === 'largest') return (b.value || 0) - (a.value || 0);
-      if (state.sort === 'dip') return ((b.dip && b.dip.pct) || -1) - ((a.dip && a.dip.pct) || -1);
-      return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.value || 0) - (a.value || 0);
-    });
-    $('feed').innerHTML = list.length ? list.map(rowCard).join('')
-      : '<div class="empty">No buys match these filters.</div>';
-  }
-
-  // Compact one-line row that opens into the full card. Keeps the full list scannable.
-  function rowCard(t) {
-    return '<details class="rowc"><summary>' +
-      '<div class="rowc__main"><div class="rowc__co">' + esc(t.company) + ' <span class="tk">' + esc(t.ticker) + '</span></div>' +
-      '<div class="rowc__who">' + esc(t.insider) + ' · ' + dayLabel(t.date) + ' · ' + badge(t.source) + '</div></div>' +
-      '<div class="rowc__amt">' + money(t.value) + '</div>' +
-      '<svg class="rowc__chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg>' +
-      '</summary><div class="rowc__body">' + card(t, { body: true }) + '</div></details>';
-  }
-
-  var CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
-  var CHEV = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg>';
-
-  function dropdown(id, label, options, key, parse) {
-    var root = $(id), cur = state[key];
-    function text() { return options.filter(function (o) { return o.v === cur; })[0].t; }
-    root.innerHTML = '<button type="button" class="dd__btn" aria-haspopup="listbox" aria-expanded="false" aria-label="' + label + '">' +
-      '<span class="dd__txt">' + text() + '</span>' + CHEV + '</button>' +
-      '<div class="dd__menu" role="listbox" aria-label="' + label + '">' +
-      options.map(function (o) {
-        return '<button type="button" class="dd__opt" role="option" data-v="' + o.v + '" aria-selected="' + (o.v === cur) + '">' +
-          '<span class="dd__radio">' + CHECK + '</span>' + o.t + '</button>';
-      }).join('') + '</div>';
-    var btn = root.querySelector('.dd__btn');
-    btn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      var open = !root.classList.contains('is-open');
-      closeAll();
-      if (open) { root.classList.add('is-open'); btn.setAttribute('aria-expanded', 'true'); }
-    });
-    Array.prototype.forEach.call(root.querySelectorAll('.dd__opt'), function (b) {
-      b.addEventListener('click', function () {
-        var raw = b.getAttribute('data-v');
-        cur = state[key] = parse ? parse(raw) : raw;
-        Array.prototype.forEach.call(root.querySelectorAll('.dd__opt'), function (x) {
-          x.setAttribute('aria-selected', String(x === b));
-        });
-        root.querySelector('.dd__txt').textContent = text();
-        closeAll(); renderFeed();
-      });
-    });
-  }
-  function closeAll() {
-    Array.prototype.forEach.call(document.querySelectorAll('.dd'), function (d) {
-      d.classList.remove('is-open');
-      var b = d.querySelector('.dd__btn'); if (b) b.setAttribute('aria-expanded', 'false');
-    });
-  }
-  document.addEventListener('click', closeAll);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
-
-  function initFilters() {
-    dropdown('dd-sort', 'Sort', [
-      { v: 'recent', t: 'Latest' }, { v: 'largest', t: 'Largest' }, { v: 'dip', t: 'Steepest dip' }
-    ], 'sort');
-    dropdown('dd-size', 'Minimum size', [
-      { v: 0, t: 'Any size' }, { v: 50000, t: '$50K+' }, { v: 250000, t: '$250K+' }, { v: 1000000, t: '$1M+' }
-    ], 'size', function (r) { return Number(r); });
-    if (HAS_SEC) {
-      $('dd-conf').hidden = true;
-      $('filters').classList.add('two');
-    } else {
-      dropdown('dd-conf', 'Data quality', [
-        { v: 'all', t: 'All data' }, { v: 'verified', t: 'Confirmed only' }
-      ], 'conf');
-    }
-  }
-
-  function initToggle() {
-    var wrap = $('when-toggle');
-    Array.prototype.forEach.call(wrap.querySelectorAll('.seg__btn'), function (b) {
-      b.addEventListener('click', function () {
-        measure = b.getAttribute('data-m');
-        selDay = null; // re-pick the busiest day for the new measure
-        Array.prototype.forEach.call(wrap.querySelectorAll('.seg__btn'), function (x) {
-          var on = x === b; x.classList.toggle('is-on', on); x.setAttribute('aria-pressed', String(on));
-        });
-        renderChart();
-      });
-    });
-  }
-
-  /* ---------- price chart (Yahoo-style) ---------- */
-  var PRICES = window.INSIDER_PRICES || {};
-  var DEMO = /[?&]demo(=|&|$)/.test(location.search);
-  var RANGES = [['1M', 31], ['3M', 92], ['6M', 183], ['1Y', 366]];
-  var cs = { id: null, range: '6M' }, lastFocus = null, demoCache = {};
-
-  function toDate(e) { return new Date(e * 864e5).toISOString().slice(0, 10); }
-  function toEpoch(iso) { return Math.round(parseDay(iso).getTime() / 864e5); }
-  function p2(v) { return '$' + (v >= 1 ? v.toFixed(2) : v.toFixed(3)); }
-  function pctTxt(v) { return (v < 0 ? '−' : '+') + Math.abs(v).toFixed(1) + '%'; }
-  function tradeById(id) { return TRADES.filter(function (x) { return x.id === id; })[0]; }
-  function realSeries(t) { var s = PRICES[t.ticker]; return s && s.d && s.d.length > 5 ? s : null; }
-
-  // Made-up prices for previewing the chart (only with ?demo in the address).
-  function demoSeries(t) {
-    if (demoCache[t.ticker]) return demoCache[t.ticker];
-    var seed = 7, i;
-    for (i = 0; i < t.ticker.length; i++) seed = (seed * 31 + t.ticker.charCodeAt(i)) >>> 0;
-    function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
-    var latest = TRADES.map(function (x) { return x.date; }).sort().pop();
-    var last = toEpoch(latest), td = toEpoch(t.date), days = [], e, ti = 0;
-    for (e = last - 380; e <= last; e++) {
-      var wd = new Date(e * 864e5).getUTCDay();
-      if (wd !== 0 && wd !== 6) days.push(e);
-    }
-    days.forEach(function (d, k) { if (d <= td) ti = k; });
-    var c = new Array(days.length); c[ti] = t.price || 10;
-    var drift = Math.log(1 / (1 - Math.min(t.dip ? t.dip.pct : 8, 90) / 100)) / 60;
-    for (i = ti - 1; i >= 0; i--) {
-      c[i] = Math.max(0.01, c[i + 1] * Math.exp((rnd() - 0.5) * 0.05 + (ti - i <= 60 ? drift : -0.0004)));
-    }
-    for (i = ti + 1; i < days.length; i++) c[i] = Math.max(0.01, c[i - 1] * Math.exp((rnd() - 0.5) * 0.05));
-    return (demoCache[t.ticker] = { d: days, c: c.map(function (v) { return Math.round(v * 1000) / 1000; }) });
-  }
-  function seriesFor(t) {
-    var r = realSeries(t);
-    if (r) return { d: r.d, c: r.c, demo: false };
-    if (DEMO) { var s = demoSeries(t); return { d: s.d, c: s.c, demo: true }; }
-    return null;
-  }
-
-  // Real price history makes "since bought" live instead of a frozen number.
-  TRADES.forEach(function (t) {
-    var s = realSeries(t);
-    if (s && t.price) t.sinceBought = Math.round((s.c[s.c.length - 1] / t.price - 1) * 1000) / 10;
-  });
-
-  function openChart(id) {
-    var t = tradeById(id); if (!t) return;
-    lastFocus = document.activeElement; cs.id = id;
-    var s = seriesFor(t);
-    if (s) {
-      var need = s.d[s.d.length - 1] - toEpoch(t.date) + 14;
-      cs.range = (RANGES.filter(function (r) { return r[1] >= need; })[0] || RANGES[RANGES.length - 1])[0];
-    }
-    $('chart-modal').hidden = false;
-    document.body.classList.add('modal-open');
-    drawSheet();
-    $('cm-close').focus();
-  }
-  function closeChart() {
-    $('chart-modal').hidden = true;
-    document.body.classList.remove('modal-open');
-    if (lastFocus && lastFocus.focus) lastFocus.focus();
-  }
-
-  function drawSheet() {
-    var t = tradeById(cs.id), s = seriesFor(t);
-    $('cm-title').textContent = t.ticker + ' · ' + t.company;
-    $('cm-sub').textContent = t.insider + ' (' + roleOf(t) + ') bought ' + money(t.value) +
-      (t.price != null ? ' at ' + (t.approxPrice ? '~' : '') + p2(t.price) : '') + ' on ' + dayLabel(t.date, true);
-    $('cm-demo').hidden = !(s && s.demo);
-
-    $('cm-ranges').innerHTML = RANGES.map(function (r) {
-      return '<button type="button" class="seg__btn' + (r[0] === cs.range ? ' is-on' : '') + '" data-r="' + r[0] +
-        '" aria-pressed="' + (r[0] === cs.range) + '">' + r[0] + '</button>';
-    }).join('');
-    Array.prototype.forEach.call($('cm-ranges').querySelectorAll('button'), function (b) {
-      b.addEventListener('click', function () { cs.range = b.getAttribute('data-r'); drawSheet(); });
-    });
-
-    if (!s) {
-      $('cm-chart').innerHTML = '<div class="empty">Price history is not loaded yet. It appears after the updater has run. ' +
-        'Add ?demo to the address to preview with made-up prices.</div>';
-      $('cm-readout').innerHTML = '';
-      $('cm-stats').innerHTML = statsHtml([['Price paid', t.price != null ? p2(t.price) : '—'], ['Value', money(t.value)]]);
-    } else {
-      drawChart(t, s);
-    }
-    histHtml(t);
-  }
-
-  function statsHtml(items) {
-    return items.map(function (x) {
-      return '<div class="cm-stat"><div class="row__k">' + x[0] + '</div><div class="cm-stat__v' + (x[2] ? ' ' + x[2] : '') + '">' + x[1] + '</div></div>';
-    }).join('');
-  }
-
-  function histHtml(t) {
-    var list = TRADES.filter(function (x) { return x.ticker === t.ticker; })
-      .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-    $('cm-hist').innerHTML = '<h3>CEO buys in ' + esc(t.ticker) + '</h3>' + list.map(function (x) {
-      return '<button type="button" class="hist__row' + (x.id === t.id ? ' is-cur' : '') + '" data-id="' + esc(x.id) + '">' +
-        '<span><strong>' + dayLabel(x.date, true) + '</strong> · ' + esc(x.insider) + '</span>' +
-        '<span>' + money(x.value) + (x.price != null ? ' @ ' + (x.approxPrice ? '~' : '') + p2(x.price) : '') + '</span></button>';
-    }).join('');
-    Array.prototype.forEach.call($('cm-hist').querySelectorAll('.hist__row'), function (b) {
-      b.addEventListener('click', function () { cs.id = b.getAttribute('data-id'); drawSheet(); });
-    });
-  }
-
-  function drawChart(t, s) {
-    if (window.ChartPro) return window.ChartPro.draw(t, s, { trades: TRADES, range: cs.range, ranges: RANGES, p2: p2, day: dayLabel, esc: esc, money: money, stats: statsHtml, epoch: toEpoch });
-    var n0 = s.d.length, lastD = s.d[n0 - 1];
-    var days = RANGES.filter(function (r) { return r[0] === cs.range; })[0][1];
+  function chart(t, s) {
+    var n0 = s.d.length, lastD = s.d[n0 - 1], days = RANGES.filter(function (r) { return r[0] === sh.range; })[0][1];
     var i0 = 0; while (i0 < n0 - 2 && s.d[i0] < lastD - days) i0++;
     var D = s.d.slice(i0), C = s.c.slice(i0), n = D.length;
-    var buys = TRADES.filter(function (x) { return x.ticker === t.ticker && x.price != null && toEpoch(x.date) >= D[0]; });
-
-    var W = 640, H = 290, L = 8, R = 58, T = 16, B = 26;
-    var lo = Math.min.apply(null, C), hi = Math.max.apply(null, C);
-    buys.forEach(function (b) { lo = Math.min(lo, b.price); hi = Math.max(hi, b.price); });
-    var pad = (hi - lo) * 0.08 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
-    function X(i) { return L + (n === 1 ? 0 : i / (n - 1)) * (W - L - R); }
-    function Y(v) { return T + (1 - (v - lo) / (hi - lo)) * (H - T - B); }
-    function idxOn(e) { var k = 0; for (var i = 0; i < n; i++) if (D[i] <= e) k = i; return k; }
-
-    var line = '', i;
-    for (i = 0; i < n; i++) line += (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(C[i]).toFixed(1);
-    var area = line + 'L' + X(n - 1).toFixed(1) + ' ' + (H - B) + 'L' + X(0).toFixed(1) + ' ' + (H - B) + 'Z';
-    var up = C[n - 1] >= C[0], dir = up ? 'up' : 'down';
-
-    var grid = '';
-    for (i = 0; i < 4; i++) {
-      var v = lo + (hi - lo) * i / 3, y = Y(v).toFixed(1);
-      grid += '<line class="pc-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/>' +
-        '<text class="pc-axis" x="' + (W - R + 6) + '" y="' + (Number(y) + 4) + '">' + p2(v) + '</text>';
-    }
-    var xt = [0, Math.round((n - 1) / 3), Math.round((n - 1) * 2 / 3), n - 1];
-    xt.forEach(function (k, j) {
-      grid += '<text class="pc-axis" x="' + X(k).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="' +
-        (j === 0 ? 'start' : j === 3 ? 'end' : 'middle') + '">' + dayLabel(toDate(D[k])) + '</text>';
+    var buys = TRADES.filter(function (x) { return x.ticker === t.ticker && x.price && epoch(x.date) >= D[0]; });
+    var W = Math.round(Math.max(320, Math.min(720, $('sh-chart').clientWidth || 640))), H = W < 500 ? 240 : 300, L = 8, R = 62, T = 18, B = 28; // 1 SVG unit = 1 px, so labels stay readable on phones
+    var lo = Math.min.apply(null, C), hi = Math.max.apply(null, C), inR = t.price && epoch(t.date) >= D[0];
+    if (inR) { lo = Math.min(lo, t.price); hi = Math.max(hi, t.price); }
+    var pad = (hi - lo) * 0.1 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
+    function PX(i) { return L + (n === 1 ? 0 : i / (n - 1)) * (W - L - R); }
+    function PY(v) { return T + (1 - (v - lo) / (hi - lo)) * (H - T - B); }
+    function at(e) { var k = 0; for (var i = 0; i < n; i++) if (D[i] <= e) k = i; return k; }
+    var xs = C.map(function (_, i) { return PX(i); }), ys = C.map(PY), line = smooth(xs, ys);
+    var area = line + 'L' + xs[n - 1].toFixed(1) + ' ' + (H - B) + 'L' + xs[0].toFixed(1) + ' ' + (H - B) + 'Z', dir = C[n - 1] >= C[0] ? 'up' : 'dn';
+    var paidY = inR ? PY(t.price) : null, g = '';
+    ticks(lo, hi, 4).forEach(function (v) {
+      var y = PY(v); if (y < T - 2 || y > H - B + 2) return;
+      g += '<line class="pc-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '"/>';
+      if (paidY == null || Math.abs(y - paidY) > 16) g += '<text class="pc-axis" x="' + (W - R + 8) + '" y="' + (y + 4).toFixed(1) + '">$' + (v >= 100 ? v.toFixed(0) : v.toFixed(v % 1 ? 2 : 0)) + '</text>';
     });
-
-    var marks = '', sel = '', selY = null;
+    [0, Math.round((n - 1) / 3), Math.round((n - 1) * 2 / 3), n - 1].forEach(function (k, j) {
+      g += '<text class="pc-axis" x="' + xs[k].toFixed(1) + '" y="' + (H - 8) + '" text-anchor="' + (j === 0 ? 'start' : j === 3 ? 'end' : 'middle') + '">' + day(isoOf(D[k])) + '</text>';
+    });
+    var marks = '', sel = '';
     buys.forEach(function (b) {
-      var cx = X(idxOn(toEpoch(b.date))), cy = Y(b.price), isSel = b.id === t.id;
-      if (!isSel) {
-        marks += '<circle class="pc-mk" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="4.5"><title>' +
-          esc(b.insider) + ' bought ' + money(b.value) + ' at ' + p2(b.price) + ' on ' + dayLabel(b.date, true) + '</title></circle>';
-        return;
-      }
-      selY = cy;
-      var txt = 'Bought ' + money(b.value) + ' @ ' + p2(b.price), w = txt.length * 6.6 + 18, h = 24;
-      var tx = Math.max(L, Math.min(W - R - w, cx - w / 2));
-      var ty = cy - 40 > T ? cy - 40 : cy + 16;
-      sel = '<line class="pc-stem" x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="' + cy.toFixed(1) +
-        '" y2="' + (ty < cy ? ty + h : ty).toFixed(1) + '"/>' +
-        '<rect class="pc-tag" x="' + tx.toFixed(1) + '" y="' + ty.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h + '" rx="7"/>' +
-        '<text class="pc-tagtxt" x="' + (tx + w / 2).toFixed(1) + '" y="' + (ty + 16).toFixed(1) + '" text-anchor="middle">' + esc(txt) + '</text>' +
-        '<circle class="pc-mk pc-mk--sel" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="7"/>';
+      var k = at(epoch(b.date)), cx = xs[k], cy = ys[k];
+      if (b !== t) { marks += '<circle class="pc-mk pc-in" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="5"><title>' + esc(b.insider) + ' bought ' + money(b.value) + ' at ' + p2(b.price) + ' on ' + day(b.date, true) + '</title></circle>'; return; }
+      var txt = 'Bought ' + money(b.value) + ' @ ' + p2(b.price), w = txt.length * 6.7 + 20, h = 26, tx = Math.max(L, Math.min(W - R - w - 4, cx - w / 2)), above = cy - 46 > T, ty = above ? cy - 46 : cy + 18;
+      sel = '<g class="pc-in"><line class="pc-stem" x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="' + cy.toFixed(1) + '" y2="' + (above ? ty + h : ty).toFixed(1) + '"/>' +
+        '<rect class="pc-tag" x="' + tx.toFixed(1) + '" y="' + ty.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h + '" rx="8"/><text class="pc-tagtxt" x="' + (tx + w / 2).toFixed(1) + '" y="' + (ty + 17).toFixed(1) + '" text-anchor="middle">' + esc(txt) + '</text>' +
+        '<circle class="pc-halo" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="12"/><circle class="pc-sel" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="6.5"/></g>';
     });
-    var paid = '';
-    if (selY != null) {
-      paid = '<line class="pc-paid" x1="' + L + '" x2="' + (W - R) + '" y1="' + selY.toFixed(1) + '" y2="' + selY.toFixed(1) + '"/>' +
-        '<rect class="pc-paidtag" x="' + (W - R + 2) + '" y="' + (selY - 10).toFixed(1) + '" width="54" height="20" rx="5"/>' +
-        '<text class="pc-paidtxt" x="' + (W - R + 29) + '" y="' + (selY + 4).toFixed(1) + '" text-anchor="middle">' + p2(t.price) + '</text>';
-    }
-
-    $('cm-chart').innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" tabindex="0" aria-label="' +
-      esc(t.ticker) + ' price over ' + cs.range + ' with CEO buys marked. Use left and right arrows to read prices.">' +
-      '<defs><linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="pc-s0 ' + dir + '"/><stop offset="1" class="pc-s1 ' + dir + '"/></linearGradient></defs>' +
-      grid + '<path class="pc-area" d="' + area + '"/><path class="pc-line ' + dir + '" d="' + line + '"/>' + paid + marks + sel +
-      '<line class="pc-cross" id="pc-x" y1="' + T + '" y2="' + (H - B) + '" visibility="hidden"/>' +
-      '<circle class="pc-dot" id="pc-d" r="4.5" visibility="hidden"/>' +
-      '<rect x="' + L + '" y="0" width="' + (W - L - R) + '" height="' + H + '" fill="transparent" id="pc-ov"/></svg>';
-
-    var svg = $('cm-chart').querySelector('svg'), cross = $('pc-x'), dot = $('pc-d'), cur = n - 1;
+    var paid = paidY == null ? '' : '<g class="pc-in"><line class="pc-paid" x1="' + L + '" x2="' + (W - R) + '" y1="' + paidY.toFixed(1) + '" y2="' + paidY.toFixed(1) + '"/><rect class="pc-paidtag" x="' + (W - R + 3) + '" y="' + (paidY - 11).toFixed(1) + '" width="' + (R - 4) + '" height="22" rx="6"/><text class="pc-paidtxt" x="' + (W - R + 3 + (R - 4) / 2) + '" y="' + (paidY + 4).toFixed(1) + '" text-anchor="middle">' + p2(t.price) + '</text></g>';
+    var box = $('sh-chart');
+    box.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" tabindex="0" aria-label="' + esc(t.ticker) + ' price over ' + sh.range + ' with CEO buys marked. Use left and right arrow keys to read prices.">' +
+      '<defs><linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="pc-s0 ' + dir + '"/><stop offset="1" class="pc-s1 ' + dir + '"/></linearGradient>' +
+      '<clipPath id="pcc"><rect id="pcc-r" x="0" y="0" width="' + (REDUCED ? W : 0) + '" height="' + H + '"/></clipPath></defs>' + g +
+      '<g clip-path="url(#pcc)"><path class="pc-area" d="' + area + '"/><path class="pc-line ' + dir + '" d="' + line + '"/></g>' + paid + marks + sel +
+      '<g id="pc-cur" class="pc-cur" style="opacity:0"><line class="pc-cross" x1="0" x2="0" y1="' + T + '" y2="' + (H - B) + '"/><circle class="pc-dot" cx="0" cy="0" r="5"/></g></svg>';
+    var svg = box.querySelector('svg'), clip = $('pcc-r');
+    if (!REDUCED) { var t0 = performance.now(); (function grow(now) { var k = Math.max(0, Math.min(1, (now - t0) / 700)), e = 1 - Math.pow(1 - k, 3); clip.setAttribute('width', (W * e).toFixed(1)); if (k < 1) requestAnimationFrame(grow); else svg.classList.add('is-drawn'); })(t0); }
+    else svg.classList.add('is-drawn');
+    $('sh-readout').innerHTML = '<span id="ro-d"></span><span class="readout__p" id="ro-p"></span><span id="ro-c"></span>';
+    var cur = n - 1, curG = $('pc-cur'), dot = curG.querySelector('.pc-dot');
     function read(k, live) {
-      var vv = C[k], since = t.price ? (vv / t.price - 1) * 100 : null;
-      $('cm-readout').innerHTML = '<span class="readout__d">' + dayLabel(toDate(D[k]), true) + '</span>' +
-        '<span class="readout__p">' + p2(vv) + '</span>' +
-        (since != null ? '<span class="' + (since < 0 ? 'neg' : 'pos') + '">' + pctTxt(since) + ' vs buy price</span>' : '');
-      var on = live ? 'visible' : 'hidden';
-      cross.setAttribute('visibility', on); dot.setAttribute('visibility', on);
-      if (live) {
-        cross.setAttribute('x1', X(k)); cross.setAttribute('x2', X(k));
-        dot.setAttribute('cx', X(k)); dot.setAttribute('cy', Y(vv));
-      }
+      var v = C[k], sb = t.price ? (v / t.price - 1) * 100 : null;
+      $('ro-d').textContent = day(isoOf(D[k]), true) + (live ? '' : ' · latest');
+      roll($('ro-p'), p2(v), live ? 200 : 600);
+      if (sb != null) { $('ro-c').className = sb < 0 ? 'neg' : 'pos'; roll($('ro-c'), signPct(sb) + ' vs buy price', live ? 200 : 600); }
+      curG.style.opacity = live ? 1 : 0; curG.style.transform = 'translateX(' + xs[k].toFixed(1) + 'px)'; dot.setAttribute('cy', ys[k].toFixed(1));
     }
-    function fromEvent(ev) {
-      var r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * W;
-      return Math.max(0, Math.min(n - 1, Math.round((x - L) / (W - L - R) * (n - 1))));
-    }
-    ['pointermove', 'pointerdown'].forEach(function (ev) {
-      svg.addEventListener(ev, function (e) { cur = fromEvent(e); read(cur, true); });
-    });
+    function idx(ev) { var r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * W; return Math.max(0, Math.min(n - 1, Math.round((x - L) / (W - L - R) * (n - 1)))); }
+    svg.addEventListener('pointermove', function (e) { var k = idx(e); if (k !== cur) { cur = k; read(k, true); } });
+    svg.addEventListener('pointerdown', function (e) { cur = idx(e); read(cur, true); });
     svg.addEventListener('pointerleave', function () { cur = n - 1; read(cur, false); });
     svg.addEventListener('keydown', function (e) {
-      if (e.key === 'ArrowLeft') cur = Math.max(0, cur - 1);
-      else if (e.key === 'ArrowRight') cur = Math.min(n - 1, cur + 1);
-      else return;
+      if (e.key === 'ArrowLeft') cur = Math.max(0, cur - 1); else if (e.key === 'ArrowRight') cur = Math.min(n - 1, cur + 1); else return;
       e.preventDefault(); read(cur, true);
     });
     read(n - 1, false);
-
-    // 90-day peak before the buy, for the "dip at buy" stat
-    var td = toEpoch(t.date), seg = [];
-    for (i = 0; i < n0; i++) if (s.d[i] >= td - 90 && s.d[i] <= td) seg.push(s.c[i]);
-    var dipPct = t.dip ? t.dip.pct : (seg.length > 19 && t.price ? Math.max(0, Math.round((Math.max.apply(null, seg) - t.price) / Math.max.apply(null, seg) * 100)) : null);
-    var since = t.price ? (C[n - 1] / t.price - 1) * 100 : null;
-    $('cm-stats').innerHTML = statsHtml([
-      ['Price paid', t.price != null ? (t.approxPrice ? '~' : '') + p2(t.price) : '—'],
-      ['Latest close', p2(s.c[n0 - 1])],
-      ['Since buy', since != null ? pctTxt(since) : '—', since != null ? (since < 0 ? 'neg' : 'pos') : ''],
-      ['Dip at buy', dipPct != null ? '−' + dipPct + '%' : '—', dipPct ? 'neg' : '']
-    ]);
+    var q = quote(t.ticker), sb = q && t.price ? (q.last / t.price - 1) * 100 : null;
+    $('sh-stats').innerHTML = [['Price paid', p2(t.price)], ['Latest close', q ? p2(q.last) : p2(C[n - 1])],
+      ['Since buy', sb != null ? signPct(sb) : '—', sb != null ? (sb < 0 ? 'neg' : 'pos') : ''], ['Fell before buy', t.dip ? '−' + t.dip.pct + '%' : '—', t.dip ? 'neg' : '']]
+      .map(function (x) { return '<div><span class="k">' + x[0] + '</span><div class="v ' + (x[2] || '') + '" data-roll="' + esc(x[1]) + '"></div></div>'; }).join('');
+    Array.prototype.forEach.call($('sh-stats').querySelectorAll('[data-roll]'), function (el) { roll(el, el.getAttribute('data-roll'), 700); });
   }
+  $('sh-ranges').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-r]'); if (!b) return; sh.range = b.getAttribute('data-r'); drawSheet();
+  });
+
+  /* =================== Congress (loaded on first open) =================== */
+  var POL = null, cst = { q: '', f: 'all', limit: 40, open: {} };
+  var CF = [['all', 'All'], ['buy', 'Buys'], ['sell', 'Sells'], ['House', 'House'], ['Senate', 'Senate'], ['D', 'Democrats'], ['R', 'Republicans']];
+  function polRows() {
+    return POL.trades.filter(function (t) {
+      if (cst.f === 'buy' || cst.f === 'sell') { if (t.type !== cst.f) return false; }
+      else if (cst.f === 'House' || cst.f === 'Senate') { if (t.role !== cst.f) return false; }
+      else if (cst.f === 'D' || cst.f === 'R') { if (t.party !== cst.f) return false; }
+      if (!cst.q) return true;
+      return (t.name + ' ' + t.ticker + ' ' + (t.company || '')).toLowerCase().indexOf(cst.q.toLowerCase()) >= 0;
+    }).sort(function (a, b) { return (b.filed || b.traded).localeCompare(a.filed || a.traded) || b.traded.localeCompare(a.traded); });
+  }
+  function polRow(t) {
+    var lag = t.filed ? daysApart(t.traded, t.filed) : null, buy = t.type === 'buy', open = !!cst.open[t.id];
+    return '<article class="row' + (open ? ' is-open' : '') + '" data-pid="' + esc(t.id) + '">' +
+      '<button type="button" class="row__head" aria-expanded="' + open + '"><span class="cav cav--' + (t.party || 'I') + '">' + esc(initials(t.name)) + '</span>' +
+      '<span class="row__main"><span class="row__l1"><span class="row__co">' + esc(t.name) + '</span><span class="tk">' + esc(t.ticker) + '</span></span>' +
+      '<span class="row__l2"><span>' + esc((t.party || '?') + '-' + (t.state || '') + ' · ' + t.role) + '</span><span>Traded ' + day(t.traded) + (lag != null ? ', public ' + lag + ' days later' : '') + '</span></span></span>' +
+      '<span class="row__right"><span class="pill pill--' + (buy ? 'buy' : 'sell') + '">' + (buy ? 'Bought' : 'Sold') + '</span><div class="row__stake" style="color:var(--text-2)" title="' + esc(t.amount) + '">' + esc(shortRange(t.amount)) + '</div></span></button>' +
+      '<div class="row__body"><div class="row__inner">' + (open ? polBody(t) : '') + '</div></div></article>';
+  }
+  function shortRange(a) { // "$1,001 - $15,000" -> "$1K–$15K"
+    var n = String(a || '').match(/[\d,]+/g);
+    if (!n) return a || '';
+    return n.slice(0, 2).map(function (x) { return money(Math.round(+x.replace(/,/g, '') / 1000) * 1000 || +x.replace(/,/g, '')); }).join('–') + (n.length === 1 && /over|\+/i.test(a) ? '+' : '');
+  }
+  function polBody(t) {
+    var lag = t.filed ? daysApart(t.traded, t.filed) : null;
+    return '<div class="row__pad"><dl class="kv">' +
+      '<div><dt>Amount</dt><dd style="font-size:.875rem">' + esc(t.amount) + '</dd></div>' +
+      '<div><dt>Asset</dt><dd style="font-size:.875rem">' + esc(t.company || t.ticker) + '</dd></div>' +
+      '<div><dt>Owner</dt><dd>' + esc(t.owner || 'Self') + '</dd></div>' +
+      '<div><dt>Traded</dt><dd>' + day(t.traded, true) + '</dd></div>' +
+      '<div><dt>Made public</dt><dd>' + (t.filed ? day(t.filed, true) : '—') + (lag != null ? '<small>' + lag + ' days later' + (lag > 45 ? ', past the 45-day limit' : '') + '</small>' : '') + '</dd></div></dl>' +
+      '<p class="fine">Amount is a range. Members only have to report the bracket, not the exact figure.</p>' +
+      '<div>' + (t.url ? srcLink({ label: 'Official ' + (t.role === 'Senate' ? 'Senate' : 'House') + ' filing', url: t.url }) : '') + (t.sources || []).map(srcLink).join('') + '</div></div>';
+  }
+  function renderCongress() {
+    var list = polRows();
+    $('c-filters').innerHTML = CF.map(function (f) { return '<button type="button" class="chip' + (cst.f === f[0] ? ' is-on' : '') + '" data-cf="' + f[0] + '" aria-pressed="' + (cst.f === f[0]) + '">' + f[1] + '</button>'; }).join('');
+    $('c-feed').innerHTML = list.slice(0, cst.limit).map(polRow).join('') || '<div class="empty">No trades match.</div>';
+    $('c-more').hidden = list.length <= cst.limit;
+  }
+  function openCongress() {
+    if (POL) return;
+    $('c-feed').innerHTML = '<div class="empty">Loading Congress trades…</div>';
+    loadScript('politics.js').then(function () {
+      POL = window.POLITICS_DATA || { trades: [] };
+      POL.trades = (POL.trades || []).filter(function (t) { return t && t.ticker && t.traded && t.type !== 'exchange'; });
+      var buys = POL.trades.filter(function (t) { return t.type === 'buy'; }).length, people = {}, lags = [];
+      POL.trades.forEach(function (t) { var p = people[t.name] = people[t.name] || { t: t, b: 0, s: 0 }; t.type === 'buy' ? p.b++ : p.s++; if (t.filed) lags.push(daysApart(t.traded, t.filed)); });
+      lags.sort(function (a, b) { return a - b; });
+      $('c-summary').innerHTML = '<b>' + POL.trades.length + '</b> trades · <b>' + buys + '</b> buys · <b>' + Object.keys(people).length + '</b> people · made public a median <b>' + (lags[Math.floor(lags.length / 2)] || 0) + ' days</b> after the trade';
+      var top = Object.keys(people).map(function (k) { return people[k]; }).sort(function (a, b) { return (b.b + b.s) - (a.b + a.s); }).slice(0, 8);
+      $('c-people').innerHTML = '<h2>Most active</h2><div class="people">' + top.map(function (p) {
+        return '<div class="hist__r"><span class="cav cav--' + (p.t.party || 'I') + '" style="width:32px;height:32px;font-size:.75rem">' + esc(initials(p.t.name)) + '</span><span><strong>' + esc(p.t.name) + '</strong> <span class="fine">' + esc((p.t.party || '?') + '-' + (p.t.state || '') + ' · ' + p.t.role) + '</span></span><span><span class="pos">' + p.b + ' buys</span> · <span class="neg">' + p.s + ' sells</span></span></div>';
+      }).join('') + '</div>';
+      $('c-figures').innerHTML = (POL.figures || []).map(function (f) {
+        return '<h2>' + esc(f.name) + ' <span class="fine">' + esc(f.role) + '</span></h2><p class="fine">' + esc(f.summary) + '</p><ul style="margin:0;padding-left:18px;display:grid;gap:6px;font-size:.9375rem">' +
+          (f.facts || []).map(function (x) { return '<li>' + esc(typeof x === 'string' ? x : x.text) + ' ' + (x.src ? srcLink(x.src) : '') + '</li>'; }).join('') + '</ul>' +
+          (f.holdings ? '<p class="fine"><strong>Holdings:</strong> ' + esc(f.holdings) + '</p>' : '') + '<div>' + (f.links || []).map(srcLink).join('') + '</div>';
+      }).join('') + (POL.holdingsLinks || []).map(srcLink).join('');
+      renderCongress();
+    }).catch(function () { $('c-feed').innerHTML = '<div class="empty">Couldn\'t load Congress trades.</div>'; });
+  }
+
+  /* =================== tabs, events, start =================== */
+  function show(view) {
+    view = view === 'congress' ? 'congress' : 'buys';
+    ['buys', 'congress'].forEach(function (v) {
+      var on = v === view, panel = $('view-' + v);
+      if (on && panel.hidden) { panel.classList.remove('enter'); void panel.offsetWidth; panel.classList.add('enter'); }
+      panel.hidden = !on;
+      $('tab-' + v).classList.toggle('is-on', on); $('tab-' + v).setAttribute('aria-selected', String(on));
+    });
+    document.querySelector('.seg').setAttribute('data-on', view);
+    if (view === 'congress') openCongress();
+  }
+  document.querySelector('.seg').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-view]'); if (!b) return;
+    history.replaceState(null, '', '#' + b.getAttribute('data-view')); show(b.getAttribute('data-view')); window.scrollTo(0, 0);
+  });
+  window.addEventListener('hashchange', function () { show(location.hash.slice(1)); });
 
   document.addEventListener('click', function (e) {
-    var b = e.target.closest && e.target.closest('.card__btn');
-    if (b) { openChart(b.getAttribute('data-id')); return; }
-    if (e.target.closest && e.target.closest('[data-close]')) closeChart();
-  });
-  document.addEventListener('keydown', function (e) {
-    var m = $('chart-modal');
-    if (m.hidden) return;
-    if (e.key === 'Escape') { closeChart(); return; }
-    if (e.key === 'Tab') { // keep focus inside the sheet
-      var f = m.querySelectorAll('button, [tabindex="0"]');
-      if (!f.length) return;
-      var first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    var el;
+    if ((el = e.target.closest('[data-chart]'))) { openSheet(byId(el.getAttribute('data-chart'))); return; }
+    if ((el = e.target.closest('[data-watch]'))) {
+      var tk = el.getAttribute('data-watch'), i = WATCH.indexOf(tk);
+      if (i >= 0) WATCH.splice(i, 1); else WATCH.push(tk);
+      store.set('cib_watch', WATCH);
+      var on = WATCH.indexOf(tk) >= 0;
+      Array.prototype.forEach.call(document.querySelectorAll('[data-watch="' + CSS.escape(tk) + '"]'), function (b) { b.textContent = on ? '★ Watching' : '☆ Watch'; b.setAttribute('aria-pressed', String(on)); });
+      toast(on ? tk + ' added to your watchlist' : tk + ' removed from your watchlist');
+      renderFilters(); return;
     }
+    if ((el = e.target.closest('[data-jump]'))) { show('buys'); jumpTo(el.getAttribute('data-jump')); return; }
+    if ((el = e.target.closest('#feed .row__head'))) { toggleRow(el.closest('.row').getAttribute('data-id')); return; }
+    if ((el = e.target.closest('#c-feed .row__head'))) {
+      var r = el.closest('.row'), id = r.getAttribute('data-pid'), t = POL.trades.filter(function (x) { return x.id === id; })[0], open = !r.classList.contains('is-open');
+      cst.open[id] = open;
+      if (open && !r.querySelector('.row__pad')) r.querySelector('.row__inner').innerHTML = polBody(t);
+      requestAnimationFrame(function () { r.classList.toggle('is-open', open); el.setAttribute('aria-expanded', String(open)); });
+      return;
+    }
+    if ((el = e.target.closest('#bell'))) { toggleBell(); return; }
+    if ((el = e.target.closest('[data-f]'))) { st.f = el.getAttribute('data-f'); st.limit = 40; renderFilters(); renderFeed(); return; }
+    if ((el = e.target.closest('[data-cf]'))) { cst.f = el.getAttribute('data-cf'); cst.limit = 40; renderCongress(); return; }
+    if (e.target.closest('#live')) { toast(liveOk ? 'Checking the SEC every 30 seconds. Last check ' + ago(lastCheck) + '.' : 'Live feed off here. Data last updated ' + $('live-text').textContent.replace('Updated ', '') + '.'); }
   });
+  document.addEventListener('toggle', function (e) {
+    var d = e.target;
+    if (!d.matches || !d.matches('details.more-d') || !d.open) return;
+    var t = byId(d.getAttribute('data-more')), body = $('m-' + d.getAttribute('data-more'));
+    body.innerHTML = knowMoreHtml(t);
+    ensureCompanies().then(function () { body.innerHTML = knowMoreHtml(t); renderTrack(); });
+  }, true);
+  var qt;
+  $('q').addEventListener('input', function (e) { clearTimeout(qt); qt = setTimeout(function () { st.q = e.target.value.trim(); st.limit = 40; renderFeed(); }, 80); });
+  $('cq').addEventListener('input', function (e) { clearTimeout(qt); qt = setTimeout(function () { cst.q = e.target.value.trim(); cst.limit = 40; renderCongress(); }, 80); });
+  $('sort').addEventListener('change', function (e) { st.sort = e.target.value; renderFeed(); });
+  $('more').addEventListener('click', function () { st.limit += 40; renderFeed(); });
+  $('c-more').addEventListener('click', function () { cst.limit += 40; renderCongress(); });
 
-  function tradeKey(t) { return t.accession || [t.ticker, t.date, t.insider, t.shares || t.value].join('|'); }
-  // Add trades found by the live feed and redraw every CEO section.
-  function addTrades(list) {
-    var have = {}, added = [];
-    TRADES.forEach(function (t) { have[tradeKey(t)] = 1; have[[t.ticker, t.date, t.shares].join('|')] = 1; });
-    (list || []).forEach(function (t) {
-      if (!t || !t.ticker || !t.date) return;
-      if (have[tradeKey(t)] || have[[t.ticker, t.date, t.shares].join('|')]) return;
-      have[tradeKey(t)] = 1; TRADES.push(t); added.push(t);
-    });
-    if (added.length) { renderStats(); renderClusters(); renderDips(); renderChart(); renderWhere(); renderFeed(); }
-    return added;
-  }
-  var liveText = '';
-  function setStatus(text) { liveText = text; $('updated').innerHTML = text; }
-
-  window.CEOAPP = {
-    all: function () { return TRADES; }, addTrades: addTrades, setStatus: setStatus, reasonsHtml: reasonsHtml, srcLink: srcLink,
-    money: money, esc: esc, dayLabel: dayLabel, stamp: stamp, badge: badge,
-    tile: tile, roleOf: roleOf, seriesFor: seriesFor, openChart: openChart, toEpoch: toEpoch, p2: p2
-  };
-
-  renderStats();
-  renderClusters();
-  renderDips();
-  initToggle();
-  renderChart();
-  renderWhere();
-  initFilters();
-  renderFeed();
+  renderSummary(); renderFilters(); renderFeed(); renderTape(); renderTrack(); liveLabel();
+  show(location.hash.slice(1));
+  poll(); setInterval(poll, 30000); setInterval(liveLabel, 10000);
+  window.CIV = { trades: TRADES, score: score, open: openSheet }; // handy for debugging in the console
 })();
