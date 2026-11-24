@@ -90,10 +90,14 @@ function parseForm4(text, meta) {
     const px = parseFloat(valueOf(amounts, 'transactionPricePerShare'));
     const day = valueOf(tx, 'transactionDate').slice(0, 10);
     if (!(shares > 0) || !(px > 0) || !day) continue;
-    const b = byDay[day] || (byDay[day] = { shares: 0, value: 0 });
+    const b = byDay[day] || (byDay[day] = { shares: 0, value: 0, after: null });
     b.shares += shares; b.value += shares * px;
+    const after = parseFloat(valueOf(tagText(tx, 'postTransactionAmounts'), 'sharesOwnedFollowingTransaction'));
+    const nature = valueOf(tagText(tx, 'ownershipNature'), 'directOrIndirectOwnership');
+    if (after >= 0 && nature !== 'I') b.after = after;
   }
 
+  const plan = ['1', 'true'].includes(tagText(doc, 'aff10b5One').toLowerCase());
   const acc = meta.accession || '';
   return Object.keys(byDay).sort().filter(d => byDay[d].value >= (meta.minValue == null ? MIN_VALUE : meta.minValue)).map(day => {
     const b = byDay[day];
@@ -102,7 +106,7 @@ function parseForm4(text, meta) {
       ticker, company: titleCase(company), exchange: null,
       insider: prettyName(owner.name), title: owner.title,
       date: day, shares: Math.round(b.shares), price: Math.round(b.value / b.shares * 10000) / 10000,
-      value: Math.round(b.value), dip: null, sinceBought: null, source: 'sec', note: '',
+      value: Math.round(b.value), ownedAfter: b.after == null ? null : Math.round(b.after), plan, dip: null, sinceBought: null, source: 'sec', note: '',
       filedAt: meta.filedAt || null, url: meta.index || '', accession: acc,
       sources: meta.index ? [{ label: 'SEC Form 4 filing', url: meta.index }] : [],
     };
@@ -146,7 +150,7 @@ async function handler(req, res) {
     const out = await collect(ua);
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=30');
     res.end(JSON.stringify(Object.assign({ checkedAt: new Date().toISOString(), source: 'SEC EDGAR latest Form 4 filings' }, out)));
   } catch (e) {
     res.statusCode = 502;
