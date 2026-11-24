@@ -72,6 +72,9 @@ def http_get(url, ua, retries=3):
             raise
         except (urllib.error.URLError, TimeoutError):
             time.sleep(2 * (attempt + 1))
+        except Exception as e:  # bad URL, dropped connection, truncated body...: lose this request, never the whole run
+            print(f"Skipped {url[:120]}: {type(e).__name__}: {e}", flush=True)
+            return None
     return None
 
 
@@ -188,7 +191,8 @@ def parse_form4(text, min_value=0.0, url="", codes=("P",)):
     issuer = root.find("issuer")
     if issuer is None:
         return []
-    ticker = _t(issuer, "issuerTradingSymbol").upper()
+    # some filers list several classes in one field ("HEI, HEI-A"): keep the first symbol
+    ticker = (re.split(r"[\s,;]+", _t(issuer, "issuerTradingSymbol").upper().strip()) or [""])[0]
     company = _t(issuer, "issuerName")
     if not ticker or ticker in ("NONE", "N/A"):
         return []
@@ -267,7 +271,7 @@ def to_epoch(iso):
 
 def fetch_series(ticker, delay_ua=PRICE_UA):
     """Return {"d": [epoch days], "c": [closes]} or None. Yahoo first, Stooq as backup."""
-    sym = ticker.replace(".", "-")
+    sym = urllib.parse.quote(ticker.replace(".", "-"), safe="-")
     raw = http_get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1y&interval=1d", delay_ua)
     try:
         r = json.loads(raw)["chart"]["result"][0]
