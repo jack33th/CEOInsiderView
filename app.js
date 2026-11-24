@@ -396,10 +396,19 @@
   }
   /* Auto-scroll in JS (not a CSS animation) so the strip can also be swiped and every item stays tappable.
      Pauses while hovered, touched or keyboard-focused. Mouse leaving resumes at once; a finger lifting
-     resumes after 1.5s so it doesn't fight a swipe that is still gliding. Stays still (but swipeable)
-     for people who set Reduce Motion. */
-  var TAPE = { secs: 60, on: !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches),
-    hold: false, resumeAt: 0, pos: 0, last: 0 };
+     resumes after 1.5s so it doesn't fight a swipe that is still gliding.
+     People with Reduce Motion on get a still (swipeable) strip plus a play button; their choice is
+     remembered. Nobody else sees a button. */
+  var REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var TAPE = { secs: 60, on: REDUCED ? store.get('cib_tape', false) : true, hold: false, resumeAt: 0, pos: 0, last: 0 };
+  function tapeButton() {
+    var b = $('tape-btn');
+    if (!b) return;
+    b.setAttribute('aria-pressed', String(TAPE.on));
+    b.setAttribute('aria-label', TAPE.on ? 'Stop the moving ticker' : 'Play the moving ticker');
+    b.innerHTML = TAPE.on ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z"/></svg>';
+  }
   function tapeFrame(ts) {
     var el = $('tape'), half = $('tape-track').scrollWidth / 2;
     var moving = TAPE.on && !TAPE.hold && Date.now() > TAPE.resumeAt && !document.hidden && half > el.clientWidth / 2;
@@ -425,6 +434,13 @@
     // Only keyboard focus pauses it; a mouse click also focuses the item, and that must not freeze the strip.
     el.addEventListener('focusin', function (e) { if (e.target.matches(':focus-visible')) TAPE.hold = true; });
     el.addEventListener('focusout', function () { if (!el.matches(':hover')) TAPE.hold = false; });
+    if (REDUCED) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'tape__btn'; b.id = 'tape-btn';
+      b.addEventListener('click', function () { TAPE.on = !TAPE.on; store.set('cib_tape', TAPE.on); TAPE.resumeAt = 0; tapeButton(); });
+      $('tape-wrap').appendChild(b); $('tape-wrap').classList.add('has-btn');
+      tapeButton();
+    }
     requestAnimationFrame(tapeFrame);
   })();
   function jumpTo(id) {
