@@ -40,7 +40,11 @@ by a GitHub Action running `scripts/update_data.py` (hourly live feed, daily re-
 Done so far: "Bought the dip" cutoff 25% → 40% (25% matched ~60% of buys); daily run re-scans
 10 days not 120 (`--scan-days`); Congress refresh daily not hourly; failure alert via
 `NTFY_ADMIN_TOPIC`; 12-month history marked `complete` before it's used (half-read history was
-scoring as "first buy in a year"); ticker bar auto-scrolls in JS, swipeable, tappable, with pause.
+scoring as "first buy in a year"); ticker bar auto-scrolls in JS, swipeable, tappable.
+
+Ticker bar, owner's choices: no pause button (owner decided; hover, touch and keyboard focus
+pause it instead). Mouse leaving resumes instantly; a finger lifting resumes after 1.5s. A mouse
+click must not freeze it (only keyboard focus pauses). With Reduce Motion it stays still but swipeable.
 
 ## Leave out
 Guesses at why a CEO bought, more tabs, a "trending" page. Not needed yet: a database, user

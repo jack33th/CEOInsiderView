@@ -395,22 +395,16 @@
     TAPE.secs = Math.max(30, latest.length * 4);  // time for one full pass of the list
   }
   /* Auto-scroll in JS (not a CSS animation) so the strip can also be swiped and every item stays tappable.
-     Pauses while touched, hovered or focused, resumes 3s later. Starts paused for people who set Reduce Motion;
-     the pause button overrides that and is remembered. */
-  var TAPE = { secs: 60, on: store.get('cib_tape', !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)),
+     Pauses while hovered, touched or keyboard-focused. Mouse leaving resumes at once; a finger lifting
+     resumes after 1.5s so it doesn't fight a swipe that is still gliding. Stays still (but swipeable)
+     for people who set Reduce Motion. */
+  var TAPE = { secs: 60, on: !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches),
     hold: false, resumeAt: 0, pos: 0, last: 0 };
-  function tapeButton() {
-    var b = $('tape-btn');
-    b.setAttribute('aria-pressed', String(!TAPE.on));
-    b.setAttribute('aria-label', TAPE.on ? 'Pause ticker' : 'Play ticker');
-    b.innerHTML = TAPE.on ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>'
-      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z"/></svg>';
-  }
   function tapeFrame(ts) {
     var el = $('tape'), half = $('tape-track').scrollWidth / 2;
     var moving = TAPE.on && !TAPE.hold && Date.now() > TAPE.resumeAt && !document.hidden && half > el.clientWidth / 2;
     if (moving && TAPE.last) {
-      TAPE.pos += (ts - TAPE.last) * half / (TAPE.secs * 1000);
+      TAPE.pos += Math.min(ts - TAPE.last, 50) * half / (TAPE.secs * 1000);  // cap the step so a slow frame never jumps
       if (TAPE.pos >= half) TAPE.pos -= half;   // second copy lines up with the first: no visible jump
       el.scrollLeft = TAPE.pos;
     } else {
@@ -422,20 +416,15 @@
   }
   (function () {
     var el = $('tape');
-    function hold() { TAPE.hold = true; }
-    function release() { TAPE.hold = false; TAPE.resumeAt = Date.now() + 3000; }
-    el.addEventListener('touchstart', hold, { passive: true });
-    el.addEventListener('touchend', release, { passive: true });
-    el.addEventListener('touchcancel', release, { passive: true });
-    el.addEventListener('mouseenter', hold);
-    el.addEventListener('mouseleave', release);
-    el.addEventListener('focusin', hold);
-    el.addEventListener('focusout', release);
-    el.addEventListener('wheel', function () { TAPE.resumeAt = Date.now() + 3000; }, { passive: true });
-    $('tape-btn').addEventListener('click', function () {
-      TAPE.on = !TAPE.on; store.set('cib_tape', TAPE.on); TAPE.resumeAt = 0; tapeButton();
-    });
-    tapeButton();
+    el.addEventListener('mouseenter', function () { TAPE.hold = true; });
+    el.addEventListener('mouseleave', function () { TAPE.hold = false; TAPE.resumeAt = 0; });
+    el.addEventListener('touchstart', function () { TAPE.hold = true; }, { passive: true });
+    function lift() { TAPE.hold = false; TAPE.resumeAt = Date.now() + 1500; }
+    el.addEventListener('touchend', lift, { passive: true });
+    el.addEventListener('touchcancel', lift, { passive: true });
+    // Only keyboard focus pauses it; a mouse click also focuses the item, and that must not freeze the strip.
+    el.addEventListener('focusin', function (e) { if (e.target.matches(':focus-visible')) TAPE.hold = true; });
+    el.addEventListener('focusout', function () { if (!el.matches(':hover')) TAPE.hold = false; });
     requestAnimationFrame(tapeFrame);
   })();
   function jumpTo(id) {
