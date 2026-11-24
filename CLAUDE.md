@@ -29,9 +29,19 @@ by a GitHub Action running `scripts/update_data.py` (hourly live feed, daily re-
   because it makes the site look smarter.
 - A score built from 3 of 5 factors is not comparable to one from 5; keep showing factor coverage.
 
+## Score test result (2026-11-24): FAILED
+See `scripts/score_test/README.md`. 2,116 CEO buys (2025-01 to 2026-08), point-in-time, returns from
+the day after filing. Score 60+ did significantly WORSE at 90 days (median -16% vs SPY, against -7%
+for all CEO buys; company-level 95% range of the gap -21% to -3%). Holds against IWM and in both years.
+Up to 65 points go to features that went with worse returns (40%+ drop, $1M+ size, the site's
+"cluster", which mostly counts a CEO buying again). Consistent in both years: 10b5-1 and serial buying
+(4+ in a year) are red flags; first-in-a-year and 2+ other insiders (any rank) are mildly positive.
+**Decision pending with the owner:** remove the score (recommended) or rebuild it (tune on 2025,
+judge only on 2026). Don't change the score or its display until the owner decides.
+
 ## Order of work
 1. ~~Check new fields on real filings~~ done: parser verified on 210 real filings.
-2. **Test the score** (next, the main point). Needs the 12-month history in `companies.js`.
+2. ~~Test the score~~ done: failed (above).
 3. Functional fixes: per-company links (`/#TICKER`), CSV export of the filtered list, RSS feed +
    public ntfy topic (real alerts with the tab closed), give Congress less space, earnings timing
    (8-K item 2.02: a buy weeks before earnings says more than one right after).
