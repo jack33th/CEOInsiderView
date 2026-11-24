@@ -772,7 +772,8 @@ def run_ceo(args, ua):
         urls = live_filings(ua, args.pages)
     else:
         urls = []
-        for day in business_days(max(2, int(args.days * 5 / 7) + 1)):
+        scan = args.scan_days or args.days  # how far back to re-read; trades older than this but within --days are kept
+        for day in business_days(max(2, int(scan * 5 / 7) + 1)):
             found = index_filings(day, ua)
             print(f"{day}: {len(found)} Form 4 filings", flush=True)
             urls.extend(found)
@@ -810,6 +811,8 @@ def main(argv=None):
     ap.add_argument("--mode", choices=["live", "backfill"], default="live")
     ap.add_argument("--days", type=int, default=30, help="how far back to keep CEO trades")
     ap.add_argument("--min-value", type=float, default=25000)
+    ap.add_argument("--scan-days", type=int, default=0,
+                    help="backfill: only re-read filings from this many days (default: all of --days)")
     ap.add_argument("--pages", type=int, default=3, help="live mode: feed pages to read (100 entries each)")
     ap.add_argument("--no-prices", action="store_true")
     ap.add_argument("--keep-manual", action="store_true", help="keep non-SEC rows when backfilling")

@@ -110,7 +110,10 @@
     return before <= 0 ? Infinity : t.shares / before * 100;
   }
 
-  /* =================== conviction score =================== */
+  /* =================== score (experimental) =================== */
+  // Until the score passes its backtest (see README), every ring is shown in one neutral colour,
+  // so no row looks endorsed. Set to false once it passes.
+  var SCORE_EXPERIMENTAL = true;
   var RES = {
     contrarian: { label: 'Research: insiders tend to buy after drops', url: 'https://www.interactivebrokers.com/campus/traders-insight/securities/stocks/what-corporate-insider-buying-can-tell-investors-evidence-from-academic-research/' },
     cluster: { label: 'Study: cluster buys earned ~2x single buys', url: 'https://journal.tinkoff.ru/media/insider-pdf-002.pdf' },
@@ -172,15 +175,15 @@
 
   /* =================== CEO feed =================== */
   var FILTERS = [
-    ['all', 'All'], ['hi', 'High conviction'], ['watch', 'Watchlist'], ['dip', 'Bought the dip'],
-    ['cluster', 'Several insiders'], ['big', '$1M+'], ['first', 'First in a year']
+    ['all', 'All'], ['watch', 'Watchlist'], ['dip', 'Bought the dip'],
+    ['cluster', 'Several insiders'], ['big', '$1M+'], ['first', 'First in a year'], ['hi', 'Score 60+ (beta)']
   ];
   function passes(t) {
     var s = score(t);
     switch (st.f) {
       case 'hi': return s.total >= 60;
       case 'watch': return WATCH.indexOf(t.ticker) >= 0;
-      case 'dip': return t.dip && t.dip.pct >= 25;
+      case 'dip': return t.dip && t.dip.pct >= 40;  // 25% matched ~60% of buys, so it didn't filter
       case 'cluster': return s.parts[3].pts >= 10;
       case 'big': return t.value >= 1e6;
       case 'first': return t.prior12 === 0;
@@ -222,7 +225,7 @@
       : sp != null && sp >= 1 ? '<span class="row__stake">+' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% stake</span>' : '';
     return '<article class="row' + (open ? ' is-open' : '') + (isNew(t) ? ' is-new' : '') + (freshIds[t.id] ? ' fresh' : '') + '" data-id="' + esc(t.id) + '">' +
       '<button type="button" class="row__head" aria-expanded="' + open + '" aria-controls="b-' + esc(t.id) + '">' +
-      '<span class="ring ring--' + s.tier + '" style="--p:' + s.total + '" title="Conviction score ' + s.total + ' of 100"><span>' + s.total + '</span></span>' +
+      '<span class="ring ring--' + (SCORE_EXPERIMENTAL ? 'mid' : s.tier) + '" style="--p:' + s.total + '" title="Experimental score ' + s.total + ' of 100' + (s.known < 5 ? ', based on ' + s.known + ' of 5 factors' : '') + '. Not yet tested against returns." aria-label="Experimental score ' + s.total + ' of 100"><span>' + s.total + '</span></span>' +
       '<span class="row__main"><span class="row__l1"><span class="row__co">' + esc(t.company) + '</span><span class="tk">' + esc(t.ticker) + '</span>' + (w ? '<span class="star" title="On your watchlist">★</span>' : '') + '</span>' +
       '<span class="row__l2"><span>' + esc(t.insider) + '</span><span class="row__time">' + (t.filedAt ? 'Filed ' + ago(filedMs(t)) : 'Bought ' + day(t.date)) + '</span>' + stake + '</span></span>' +
       '<span class="row__right"><span class="row__amt">' + money(t.value) + '</span>' + quoteHtml(t.ticker) + '</span></button>' +
@@ -250,10 +253,9 @@
   function renderSummary() {
     var total = TRADES.reduce(function (a, t) { return a + t.value; }, 0), cos = {};
     TRADES.forEach(function (t) { cos[t.ticker] = 1; });
-    var hi = TRADES.filter(function (t) { return score(t).total >= 60; }).length;
     var span = TRADES.length ? daysApart(TRADES.reduce(function (m, t) { return t.date < m ? t.date : m; }, TRADES[0].date), new Date().toISOString().slice(0, 10)) : 0;
-    $('summary').innerHTML = '<b id="s1"></b> CEO buys in ' + span + ' days · <b id="s2"></b> in total · <b id="s3"></b> companies · <b id="s4"></b> high conviction';
-    roll($('s1'), String(TRADES.length), 800); roll($('s2'), money(total), 900); roll($('s3'), String(Object.keys(cos).length), 800); roll($('s4'), String(hi), 800);
+    $('summary').innerHTML = '<b id="s1"></b> CEO buys in ' + span + ' days · <b id="s2"></b> in total · <b id="s3"></b> companies' + (SCORE_EXPERIMENTAL ? ' · <span class="beta">Scores are experimental</span>' : '');
+    roll($('s1'), String(TRADES.length), 800); roll($('s2'), money(total), 900); roll($('s3'), String(Object.keys(cos).length), 800);
   }
 
   /* expanded row */
@@ -296,11 +298,11 @@
   }
   function knowMoreHtml(t) {
     var s = score(t), co = COMPANIES && COMPANIES[t.ticker], q = quote(t.ticker), html = '';
-    html += '<div><div class="sub-h">Why it scores ' + s.total + ' / 100</div><ul class="score-list">' + s.parts.map(function (p) {
+    html += '<div><div class="sub-h">Experimental score: why it gets ' + s.total + ' / 100</div><ul class="score-list">' + s.parts.map(function (p) {
       return '<li><span class="pts' + (p.na || p.pts === 0 ? ' zero' : p.pts < 0 ? ' minus' : '') + '">' + (p.na ? '–' : (p.pts > 0 ? '+' : '') + p.pts) + '</span><div>' +
         '<div class="why__t">' + esc(p.t) + '</div><div class="why__how">' + p.how + '</div>' +
         (p.src || p.res ? '<div class="why__src">' + (p.src ? 'Source: ' + srcLink(p.src) : '') + (p.res ? srcLink(p.res) : '') + '</div>' : '') + '</div></li>';
-    }).join('') + '</ul><p class="fine" style="margin-top:8px">' + (s.known < 5 ? 'Scored on ' + s.known + ' of 5 factors (' + s.raw + ' of ' + s.max + ' possible points, scaled to 100). Factors marked – aren\'t counted yet. ' : '') + 'Our own formula from facts in the filing. Not yet proven to predict returns: see Track record.</p></div>';
+    }).join('') + '</ul><p class="fine" style="margin-top:8px">' + (s.known < 5 ? 'Scored on ' + s.known + ' of 5 factors (' + s.raw + ' of ' + s.max + ' possible points, scaled to 100). Factors marked – aren\'t counted yet. ' : '') + '<strong>Experimental.</strong> Our own formula from facts in the filing. It has not yet been tested against what these stocks did afterwards, so treat it as a summary of the facts above, not a prediction.</p></div>';
     html += '<div><div class="sub-h">The company</div>';
     if (co) {
       var cap = co.sharesOut && q ? co.sharesOut * q.last : null;
@@ -368,7 +370,7 @@
     var winners = r.filter(function (x) { return x > 0; }).length, beat = done.filter(function (t) { return t.spy30 != null && t.r30 > t.spy30; }).length;
     var hiDone = done.filter(function (t) { return t.ticker && score(t).total >= 60; });
     var rows = [['All CEO buys', med(r), r.length]];
-    if (hiDone.length >= 3) rows.push(['Conviction 60+', med(hiDone.map(function (t) { return t.r30; })), hiDone.length]);
+    if (hiDone.length >= 3) rows.push(['Score 60+ (experimental)', med(hiDone.map(function (t) { return t.r30; })), hiDone.length]);
     if (spy.length) rows.push(['S&P 500', med(spy), spy.length]);
     var maxAbs = Math.max.apply(null, rows.map(function (x) { return Math.abs(x[1]); })) || 1;
     el.innerHTML = '<h2 id="track-h">Track record: 30 days after the buy</h2>' +
@@ -434,7 +436,7 @@
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(function (r) { swReg = r; }).catch(function () {});
   function notify(list) {
     if (!NOTIFY || !('Notification' in window) || Notification.permission !== 'granted') return;
-    var title = list.length > 1 ? list.length + ' high-conviction CEO buys' : list[0].ticker + ': CEO bought ' + money(list[0].value);
+    var title = list.length > 1 ? list.length + ' CEO buys scoring 60+' : list[0].ticker + ': CEO bought ' + money(list[0].value);
     var body = list.slice(0, 3).map(function (t) { return t.insider + ' · ' + t.ticker + ' · score ' + score(t).total; }).join('\n');
     try { if (swReg && swReg.showNotification) swReg.showNotification(title, { body: body, tag: 'cib' }); else new Notification(title, { body: body }); } catch (e) {}
   }
@@ -443,7 +445,7 @@
     if (!('Notification' in window)) { toast('This browser can\'t show alerts. Use the ntfy app (see README).'); return; }
     Notification.requestPermission().then(function (p) {
       NOTIFY = p === 'granted'; store.set('cib_notify', NOTIFY); renderFilters();
-      toast(NOTIFY ? 'Alerts on for conviction 60+ and your watchlist, while this page is open' : 'Alerts are blocked in your browser settings');
+      toast(NOTIFY ? 'Alerts on for score 60+ (experimental) and your watchlist, while this page is open' : 'Alerts are blocked in your browser settings');
     });
   }
 

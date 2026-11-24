@@ -24,9 +24,13 @@ You never edit the Action-written files by hand.
 
 Secrets stay in GitHub/Vercel settings only: `SEC_USER_AGENT` (name + email, required by the SEC) and optional `NTFY_TOPIC` for phone alerts. Never put them in a file.
 
-## Conviction score (0 to 100)
+## Score (0 to 100), experimental
 
 Our own formula, built only from facts in the filing. Every point is shown with its source when you open a buy.
+
+**Status: experimental.** The weights below are educated guesses from published research, not fitted or tested on this site's data. Until it passes a test, the site sorts by newest by default, the score isn't a headline number, and it's labelled "beta" wherever it appears.
+
+**What would make it non-experimental:** using 12 months of CEO buys and the prices after them, buys scoring 60+ must beat both the median CEO buy and SPY over 30 and 90 days, across enough buys (at least 30 in each group) that the gap isn't luck. If they don't, the weights get changed or the score is removed.
 
 | Factor | Points |
 | --- | --- |

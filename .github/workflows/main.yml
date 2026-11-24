@@ -2,12 +2,12 @@ name: Update CEO buys
 
 on:
   schedule:
-    - cron: "5 * * * *"            # hourly: CEO filings + House and Senate trades
-    - cron: "30 11 * * *"          # daily: full backfill, all prices, company details + CEO 12-month history
+    - cron: "5 * * * *"            # hourly: new CEO filings from the SEC live feed
+    - cron: "30 11 * * *"          # daily: re-read the last 10 days of filings, Congress, all prices, company details + CEO 12-month history
   workflow_dispatch:
     inputs:
       mode:
-        description: "backfill = rebuild everything (use this the first time), live = new filings only"
+        description: "backfill = rebuild everything from 120 days of filings (slow, ~4 hours), live = new filings only"
         type: choice
         options: [backfill, live]
         default: backfill
@@ -22,19 +22,24 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 330           # GitHub's hard limit is 360; fail cleanly before it
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install pypdf
-      - name: Pull SEC, House and Senate filings and prices
+      - name: Pull SEC filings, prices and (daily) Congress trades
         env:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 11 * * *' && 'backfill' || 'live') }}
-          POLITICS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule != '*/10 12-22 * * 1-5') && '--politics' || '' }}
-        run: python scripts/update_data.py --mode "$MODE" --days 120 --min-value 25000 $POLITICS
+          # Daily run re-reads only the last 10 days (catches late filings); keeps 120 days of trades.
+          # A manual backfill re-reads all 120 days.
+          SCAN: ${{ github.event.schedule == '30 11 * * *' && '--scan-days 10' || '' }}
+          # Congress reports are up to 45 days late, so hourly checks add nothing: daily and manual runs only.
+          POLITICS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '30 11 * * *') && '--politics' || '' }}
+        run: python scripts/update_data.py --mode "$MODE" --days 120 --min-value 25000 $SCAN $POLITICS
       - name: Commit only if something changed
         run: |
           git config user.name "github-actions"
@@ -46,4 +51,13 @@ jobs:
             git commit -m "Update insider trades"
             git pull --rebase
             git push
+          fi
+      - name: Alert the site owner if the update failed
+        if: failure()
+        env:
+          NTFY_ADMIN_TOPIC: ${{ secrets.NTFY_ADMIN_TOPIC }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -n "$NTFY_ADMIN_TOPIC" ]; then
+            curl -s -H "Title: CEO Insider View update failed" -H "Tags: warning" -d "$RUN_URL" "https://ntfy.sh/$NTFY_ADMIN_TOPIC"
           fi
