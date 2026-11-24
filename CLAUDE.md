@@ -48,6 +48,12 @@ click must not freeze it (only keyboard focus pauses). Visitors with Reduce Moti
 swipeable strip plus a play/stop button only they see; the choice is remembered (`cib_tape`).
 Don't override Reduce Motion for everyone: the owner chose this over always-scroll.
 
+Remembered per browser (localStorage, `cib_*` keys): watchlist, last-seen filing, alerts on/off,
+ticker play choice (Reduce Motion only), buys filter, sort, Congress filter, last tab. A `#congress`
+link beats the remembered tab. The search box is deliberately not remembered (a stale search looks
+like missing data). Invalid saved values fall back to defaults; the site works with storage blocked.
+Owner wants the site to remember options and preferences: persist any new setting the same way.
+
 ## Leave out
 Guesses at why a CEO bought, more tabs, a "trending" page. Not needed yet: a database, user
 accounts, React or another framework, paid data feeds.

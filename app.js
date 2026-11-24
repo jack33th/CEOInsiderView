@@ -178,6 +178,13 @@
     ['all', 'All'], ['watch', 'Watchlist'], ['dip', 'Bought the dip'],
     ['cluster', 'Several insiders'], ['big', '$1M+'], ['first', 'First in a year'], ['hi', 'Score 60+ (beta)']
   ];
+  // Remembered between visits: filter, sort, Congress filter, last tab (search is not: a stale search looks like missing data).
+  (function () {
+    var f = store.get('cib_filter', 'all'), s = store.get('cib_sort', 'new');
+    if (FILTERS.some(function (x) { return x[0] === f; })) st.f = f;
+    if (st.f === 'first' && !TRADES.some(function (t) { return t.prior12 != null; })) st.f = 'all'; // that chip is hidden without history
+    if (['new', 'score', 'value', 'dip'].indexOf(s) >= 0) st.sort = s;
+  })();
   function passes(t) {
     var s = score(t);
     switch (st.f) {
@@ -685,6 +692,7 @@
   /* =================== Congress (loaded on first open) =================== */
   var POL = null, cst = { q: '', f: 'all', limit: 40, open: {} };
   var CF = [['all', 'All'], ['buy', 'Buys'], ['sell', 'Sells'], ['House', 'House'], ['Senate', 'Senate'], ['D', 'Democrats'], ['R', 'Republicans']];
+  (function () { var f = store.get('cib_cfilter', 'all'); if (CF.some(function (x) { return x[0] === f; })) cst.f = f; })();
   function polRows() {
     return POL.trades.filter(function (t) {
       if (cst.f === 'buy' || cst.f === 'sell') { if (t.type !== cst.f) return false; }
@@ -758,6 +766,7 @@
       $('tab-' + v).classList.toggle('is-on', on); $('tab-' + v).setAttribute('aria-selected', String(on));
     });
     document.querySelector('.seg').setAttribute('data-on', view);
+    store.set('cib_view', view);
     if (view === 'congress') openCongress();
   }
   document.querySelector('.seg').addEventListener('click', function (e) {
@@ -788,8 +797,8 @@
       return;
     }
     if ((el = e.target.closest('#bell'))) { toggleBell(); return; }
-    if ((el = e.target.closest('[data-f]'))) { st.f = el.getAttribute('data-f'); st.limit = 40; renderFilters(); renderFeed(); return; }
-    if ((el = e.target.closest('[data-cf]'))) { cst.f = el.getAttribute('data-cf'); cst.limit = 40; renderCongress(); return; }
+    if ((el = e.target.closest('[data-f]'))) { st.f = el.getAttribute('data-f'); store.set('cib_filter', st.f); st.limit = 40; renderFilters(); renderFeed(); return; }
+    if ((el = e.target.closest('[data-cf]'))) { cst.f = el.getAttribute('data-cf'); store.set('cib_cfilter', cst.f); cst.limit = 40; renderCongress(); return; }
     if (e.target.closest('#live')) { toast(liveOk ? 'Checking the SEC every 30 seconds. Last check ' + ago(lastCheck) + '.' : 'Live feed off here. Data last updated ' + $('live-text').textContent.replace('Updated ', '') + '.'); }
   });
   document.addEventListener('toggle', function (e) {
@@ -802,12 +811,13 @@
   var qt;
   $('q').addEventListener('input', function (e) { clearTimeout(qt); qt = setTimeout(function () { st.q = e.target.value.trim(); st.limit = 40; renderFeed(); }, 80); });
   $('cq').addEventListener('input', function (e) { clearTimeout(qt); qt = setTimeout(function () { cst.q = e.target.value.trim(); cst.limit = 40; renderCongress(); }, 80); });
-  $('sort').addEventListener('change', function (e) { st.sort = e.target.value; renderFeed(); });
+  $('sort').addEventListener('change', function (e) { st.sort = e.target.value; store.set('cib_sort', st.sort); renderFeed(); });
   $('more').addEventListener('click', function () { st.limit += 40; renderFeed(); });
   $('c-more').addEventListener('click', function () { cst.limit += 40; renderCongress(); });
 
+  $('sort').value = st.sort;
   renderSummary(); renderFilters(); renderFeed(); renderTape(); renderTrack(); liveLabel();
-  show(location.hash.slice(1));
+  show(location.hash.slice(1) || store.get('cib_view', 'buys'));  // a link with #congress wins over the remembered tab
   poll(); setInterval(poll, 30000); setInterval(liveLabel, 10000);
   window.CIV = { trades: TRADES, score: score, open: openSheet }; // handy for debugging in the console
 })();
