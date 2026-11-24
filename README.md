@@ -22,13 +22,6 @@ Tracks when CEOs buy their own company's stock, straight from SEC Form 4 filings
 
 You never edit the Action-written files by hand.
 
-## Moving from the old version
-
-1. Delete `extras.js`, `enhance.js` and `prices.js` from the repo.
-2. Replace `index.html`, `style.css`, `app.js`, `api/live.js`, `scripts/update_data.py`, `.github/workflows/main.yml`, `README.md`.
-3. Upload `spark.js` (one file). You can't upload the `prices/` folder through the website, and you don't need to.
-4. Actions tab → the workflow → Run workflow. The first run creates `prices/`, `companies.js` and the new fields (stake size, 10b5-1 plan, 12-month history). Until it finishes, the site still works; charts show 2 months and conviction scores use the factors that are available.
-
 Secrets stay in GitHub/Vercel settings only: `SEC_USER_AGENT` (name + email, required by the SEC) and optional `NTFY_TOPIC` for phone alerts. Never put them in a file.
 
 ## Conviction score (0 to 100)
