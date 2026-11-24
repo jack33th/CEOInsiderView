@@ -3,7 +3,7 @@ name: Update CEO buys
 on:
   schedule:
     - cron: "5 * * * *"            # hourly: CEO filings + House and Senate trades
-    - cron: "30 11 * * *"          # daily: full backfill + refresh all prices
+    - cron: "30 11 * * *"          # daily: full backfill, all prices, company details + CEO 12-month history
   workflow_dispatch:
     inputs:
       mode:
@@ -34,12 +34,12 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 11 * * *' && 'backfill' || 'live') }}
           POLITICS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule != '*/10 12-22 * * 1-5') && '--politics' || '' }}
-        run: python scripts/update_data.py --mode "$MODE" --days 30 --min-value 25000 $POLITICS
+        run: python scripts/update_data.py --mode "$MODE" --days 120 --min-value 25000 $POLITICS
       - name: Commit only if something changed
         run: |
           git config user.name "github-actions"
           git config user.email "actions@users.noreply.github.com"
-          git add data.js prices.js politics.js
+          git add -A   # data.js, spark.js, prices/, politics.js, companies.js (and removes the old prices.js)
           if git diff --cached --quiet; then
             echo "Nothing to commit"
           else
