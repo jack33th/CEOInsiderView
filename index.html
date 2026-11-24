@@ -17,7 +17,10 @@
         <span class="live__dot" aria-hidden="true"></span><span id="live-text">Loading</span>
       </button>
     </div>
-    <div class="tape" id="tape" aria-label="Latest CEO buys"><div class="tape__track" id="tape-track"></div></div>
+    <div class="tape-wrap" id="tape-wrap">
+      <div class="tape" id="tape" role="region" aria-label="Latest CEO buys"><div class="tape__track" id="tape-track"></div></div>
+      <button type="button" class="tape__btn" id="tape-btn" aria-label="Pause ticker" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button>
+    </div>
     <nav class="seg" role="tablist" aria-label="Sections">
       <button type="button" role="tab" class="seg__btn is-on" id="tab-buys" aria-selected="true" aria-controls="view-buys" data-view="buys">Insider buys</button>
       <button type="button" role="tab" class="seg__btn" id="tab-congress" aria-selected="false" aria-controls="view-congress" data-view="congress">Congress</button>

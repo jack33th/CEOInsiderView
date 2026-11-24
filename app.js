@@ -392,8 +392,52 @@
         (q ? ' <span class="' + (q.chg >= 0 ? 'up' : 'dn') + '">' + (q.chg >= 0 ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</span>' : '') + '</button>';
     }).join('');
     $('tape-track').innerHTML = one + one.replace(/<button /g, '<button tabindex="-1" aria-hidden="true" ');
-    $('tape').style.setProperty('--tape-dur', Math.max(30, latest.length * 4) + 's');
+    TAPE.secs = Math.max(30, latest.length * 4);  // time for one full pass of the list
   }
+  /* Auto-scroll in JS (not a CSS animation) so the strip can also be swiped and every item stays tappable.
+     Pauses while touched, hovered or focused, resumes 3s later. Starts paused for people who set Reduce Motion;
+     the pause button overrides that and is remembered. */
+  var TAPE = { secs: 60, on: store.get('cib_tape', !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)),
+    hold: false, resumeAt: 0, pos: 0, last: 0 };
+  function tapeButton() {
+    var b = $('tape-btn');
+    b.setAttribute('aria-pressed', String(!TAPE.on));
+    b.setAttribute('aria-label', TAPE.on ? 'Pause ticker' : 'Play ticker');
+    b.innerHTML = TAPE.on ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z"/></svg>';
+  }
+  function tapeFrame(ts) {
+    var el = $('tape'), half = $('tape-track').scrollWidth / 2;
+    var moving = TAPE.on && !TAPE.hold && Date.now() > TAPE.resumeAt && !document.hidden && half > el.clientWidth / 2;
+    if (moving && TAPE.last) {
+      TAPE.pos += (ts - TAPE.last) * half / (TAPE.secs * 1000);
+      if (TAPE.pos >= half) TAPE.pos -= half;   // second copy lines up with the first: no visible jump
+      el.scrollLeft = TAPE.pos;
+    } else {
+      if (half && el.scrollLeft >= half) el.scrollLeft -= half;  // swiped past the end: wrap
+      TAPE.pos = el.scrollLeft;
+    }
+    TAPE.last = ts;
+    requestAnimationFrame(tapeFrame);
+  }
+  (function () {
+    var el = $('tape');
+    function hold() { TAPE.hold = true; }
+    function release() { TAPE.hold = false; TAPE.resumeAt = Date.now() + 3000; }
+    el.addEventListener('touchstart', hold, { passive: true });
+    el.addEventListener('touchend', release, { passive: true });
+    el.addEventListener('touchcancel', release, { passive: true });
+    el.addEventListener('mouseenter', hold);
+    el.addEventListener('mouseleave', release);
+    el.addEventListener('focusin', hold);
+    el.addEventListener('focusout', release);
+    el.addEventListener('wheel', function () { TAPE.resumeAt = Date.now() + 3000; }, { passive: true });
+    $('tape-btn').addEventListener('click', function () {
+      TAPE.on = !TAPE.on; store.set('cib_tape', TAPE.on); TAPE.resumeAt = 0; tapeButton();
+    });
+    tapeButton();
+    requestAnimationFrame(tapeFrame);
+  })();
   function jumpTo(id) {
     st.f = 'all'; st.q = ''; $('q').value = ''; st.sort = 'new'; $('sort').value = 'new';
     var list = sorted(TRADES), i = list.indexOf(byId(id));

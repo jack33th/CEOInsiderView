@@ -52,11 +52,14 @@ a { color: var(--accent); }
 .live.ping .live__dot::after { animation: ping .9s var(--ease) 1; }
 @keyframes ping { from { transform: scale(1); opacity: .7; } to { transform: scale(3.2); opacity: 0; } }
 
-/* ticker tape: one moving strip, paused on hover, static with reduced motion */
-.tape { overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(15, 15, 17, .6); mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }
-.tape__track { display: flex; width: max-content; animation: tape var(--tape-dur, 60s) linear infinite; }
-.tape:hover .tape__track, .tape:focus-within .tape__track { animation-play-state: paused; }
-@keyframes tape { to { transform: translateX(-50%); } }
+/* ticker tape: scrolled by app.js so it can also be swiped; pauses on touch/hover; pause button for anyone who wants it still */
+.tape-wrap { position: relative; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.tape { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; background: rgba(15, 15, 17, .6); mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }
+.tape::-webkit-scrollbar { display: none; }
+.tape__track { display: flex; width: max-content; padding-right: 40px; }
+.tape__btn { position: absolute; right: 0; top: 0; bottom: 0; width: 48px; display: grid; place-items: center; border: 0; background: linear-gradient(90deg, rgba(0, 0, 0, 0), var(--bg, #000) 30%); color: var(--text-2); padding: 0 0 0 8px; }
+.tape__btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.tape__btn:hover { color: var(--text); }
 .tick { display: inline-flex; align-items: baseline; gap: 6px; padding: 7px 16px; font-size: .8125rem; white-space: nowrap; border: 0; background: none; color: var(--text-2); }
 .tick b { color: var(--text); font-weight: 700; }
 .tick .up { color: var(--green); } .tick .dn { color: var(--red); }
@@ -249,8 +252,6 @@ dl.kv { margin: 0; }
 /* ---------- accessibility preferences ---------- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
-  .tape__track { animation: none; }
-  .tape { overflow-x: auto; }
 }
 @media (prefers-reduced-transparency: reduce) {
   .bar { background: #000; backdrop-filter: none; -webkit-backdrop-filter: none; }
