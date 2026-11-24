@@ -5,6 +5,6 @@ self.addEventListener('notificationclick', function (e) {
   e.notification.close();
   e.waitUntil(self.clients.matchAll({ type: 'window' }).then(function (list) {
     for (var i = 0; i < list.length; i++) if ('focus' in list[i]) return list[i].focus();
-    return self.clients.openWindow('./#alerts');
+    return self.clients.openWindow('./');
   }));
 });
