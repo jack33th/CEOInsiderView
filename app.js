@@ -103,7 +103,25 @@
     return { last: s.last, chg: s.prev ? (s.last / s.prev - 1) * 100 : 0, hi: s.hi, lo: s.lo, asof: s.asof };
   }
   function filedMs(t) { return t.filedAt ? Date.parse(t.filedAt) : Date.parse(t.date + 'T21:00:00Z'); }
-  function since(t) { var q = quote(t.ticker); return q && t.price ? (q.last / t.price - 1) * 100 : null; }
+  // The close on (or just before) a date, from whichever price data is loaded.
+  function closeOn(tk, iso) {
+    var e = epoch(iso), S = (SERIES || {})[tk], s = SPARK[tk], best = null, i;
+    if (S && S.d) { for (i = 0; i < S.d.length && S.d[i] <= e; i++) best = S.c[i]; if (best != null) return best; }
+    if (s && s.c) { for (i = 0; i < s.o.length && s.d0 + s.o[i] <= e; i++) best = s.c[i]; }
+    return best;
+  }
+  // A price paid far from that day's market close can't be compared with the chart: it happens with a
+  // second share class (BH: Class A ~$1,700 vs Class B ~$360, averaged together in one filing), ADRs,
+  // private placements and splits. For those, "since buy", "fell before buy" and the paid line are left
+  // out, with a note saying why. 15%: in 3,425 CEO buys (2024-26 SEC data), 90% were paid within 10% of
+  // the close and only 1.7% between 15% and 25%, so this hides few real numbers and catches the blends.
+  function comparable(t) { var c = closeOn(t.ticker, t.date); return !c || !t.price || Math.abs(t.price / c - 1) <= 0.15; }
+  function since(t) { if (!comparable(t)) return null; var q = quote(t.ticker); return q && t.price ? (q.last / t.price - 1) * 100 : null; }
+  function axisPrice(v) { return '$' + (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toFixed(3)); }
+  function mismatchNote(t) {
+    return 'The price paid (' + p2(t.price) + ') is far from ' + esc(t.ticker) + '\'s market close that day (' + p2(closeOn(t.ticker, t.date)) +
+      '), so it isn\'t compared with the chart. This happens with a second share class, ADRs, private placements and stock splits.';
+  }
   function stakePct(t) {
     if (t.ownedAfter == null || !t.shares) return null;
     var before = t.ownedAfter - t.shares;
@@ -133,7 +151,7 @@
       how: 'Owned ' + num(t.ownedAfter) + ' shares directly after the buy, up from ' + num(t.ownedAfter - t.shares) + '.', src: src });
     else if ('ownedAfter' in t && t.ownedAfter === null) out.push({ mark: '', t: 'Shares held indirectly',
       how: 'The filing reports these shares as held indirectly (for example through a trust), so stake growth isn\'t shown.', src: src });
-    if (dp != null) out.push({ mark: dp >= 40 ? 'flag' : '', t: 'Bought ' + dp + '% below the ' + (t.dip.base || 'recent peak'),
+    if (dp != null && comparable(t)) out.push({ mark: dp >= 40 ? 'flag' : '', t: 'Bought ' + dp + '% below the ' + (t.dip.base || 'recent peak'),
       how: 'Price paid ' + p2(t.price) + ' compared with the highest close in the 90 days before.' + (dp >= 40 ? ' In our test, buys after a 40%+ drop did worse than other CEO buys over 90 days.' : ''),
       src: { label: 'Daily closes (' + ((SPARK[t.ticker] || {}).s || 'price feed') + ')', url: 'https://finance.yahoo.com/quote/' + encodeURIComponent(t.ticker) + '/history' }, res: dp >= 40 ? TEST : null });
     if (t.prior12 != null) {
@@ -173,7 +191,7 @@
   function passes(t) {
     switch (st.f) {
       case 'watch': return WATCH.indexOf(t.ticker) >= 0;
-      case 'dip': return t.dip && t.dip.pct >= 40;  // 25% matched ~60% of buys, so it didn't filter
+      case 'dip': return t.dip && t.dip.pct >= 40 && comparable(t);  // 25% matched ~60% of buys, so it didn't filter
       case 'big': return t.value >= 1e6;
       case 'first': return t.prior12 === 0;
     }
@@ -188,7 +206,7 @@
     var by = {
       'new': function (a, b) { return filedMs(b) - filedMs(a) || b.value - a.value; },
       value: function (a, b) { return b.value - a.value; },
-      dip: function (a, b) { return ((b.dip && b.dip.pct) || -1) - ((a.dip && a.dip.pct) || -1); }
+      dip: function (a, b) { function d(x) { return x.dip && comparable(x) ? x.dip.pct : -1; } return d(b) - d(a); }
     }[st.sort];
     return list.slice().sort(by);
   }
@@ -288,23 +306,57 @@
     if (!PX.wait[tk]) renderTape();
   }
 
-  /* expanded row */
+  /* expanded row: preview chart, Yahoo-style. Line and fill are SVG stretched to the box; labels and
+     buy markers are HTML placed by percentages, so text stays readable and dots stay round at any width. */
+  var PVN = 0;
   function miniChart(t) {
-    return '<div class="mini__c" data-mini="' + esc(t.id) + '">' + miniInner(t) + '</div>';
+    return '<div class="pv" data-mini="' + esc(t.id) + '">' + miniInner(t) + '</div>';
+  }
+  function otherBuysLabel(t, list) {
+    var same = list.every(function (b) { return b.insider === t.insider; });
+    return (same ? 'Other buys by ' + esc(t.insider) : 'Other CEO buys at ' + esc(t.ticker)) + ' (' + list.length + ')';
   }
   function miniInner(t) {
     var s = SPARK[t.ticker];
     if (!s || !s.c || s.c.length < 3) return '<p class="fine">' + (PX.wait[t.ticker] ? 'Loading price history…' : 'Price history isn\'t available for ' + esc(t.ticker) + '.') + '</p>';
-    var n = s.c.length, lo = Math.min.apply(null, s.c), hi = Math.max.apply(null, s.c), W = 300, H = 64;
-    if (t.price) { lo = Math.min(lo, t.price); hi = Math.max(hi, t.price); }
-    function X(i) { return 2 + i / (n - 1) * (W - 4); }
-    function Y(v) { return 4 + (1 - (v - lo) / ((hi - lo) || 1)) * (H - 8); }
-    var d = s.c.map(function (v, i) { return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); }).join('');
-    var te = epoch(t.date) - s.d0, k = -1;
-    s.o.forEach(function (o, i) { if (o <= te) k = i; });
-    var mk = k >= 0 && te >= 0 ? '<circle class="mini__m" cx="' + X(k).toFixed(1) + '" cy="' + Y(s.c[k]).toFixed(1) + '" r="4"/>' : '';
-    return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' + esc(t.ticker) + ' last two months, buy marked">' +
-      '<path class="mini__l ' + (s.c[n - 1] >= s.c[0] ? 'up' : 'dn') + '" d="' + d + '"/>' + mk + '</svg>';
+    var C = s.c, n = C.length, D = s.o.map(function (o) { return s.d0 + o; });
+    var cmp = comparable(t), paidIn = cmp && t.price && epoch(t.date) >= D[0];
+    var lo = Math.min.apply(null, C), hi = Math.max.apply(null, C);
+    if (paidIn) { lo = Math.min(lo, t.price); hi = Math.max(hi, t.price); }
+    var pad = (hi - lo) * 0.1 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
+    function X(i) { return n === 1 ? 0 : i / (n - 1) * 100; }          // % across
+    function Y(v) { return (1 - (v - lo) / (hi - lo)) * 100; }          // % down
+    function at(iso) { var e = epoch(iso), k = -1; for (var i = 0; i < n && D[i] <= e; i++) k = i; return k; }
+    var dir = C[n - 1] >= C[0] ? 'up' : 'dn', gid = 'pvg' + (++PVN);
+    var line = C.map(function (v, i) { return (i ? 'L' : 'M') + (X(i) * 10).toFixed(1) + ' ' + Y(v).toFixed(2); }).join('');
+    var grid = '', ylab = '';
+    ticks(lo, hi, 3).forEach(function (v) {
+      var y = Y(v); if (y < 3 || y > 97) return;
+      grid += '<line class="pv__grid" x1="0" x2="1000" y1="' + y.toFixed(2) + '" y2="' + y.toFixed(2) + '"/>';
+      ylab += '<span class="pv__y" style="top:' + y.toFixed(2) + '%">' + axisPrice(v) + '</span>';
+    });
+    var xlab = [0, Math.round((n - 1) / 2), n - 1].map(function (k, j) {
+      return '<span class="pv__x pv__x--' + j + '" style="left:' + X(k).toFixed(2) + '%">' + day(isoOf(D[k])) + '</span>';
+    }).join('');
+    var others = TRADES.filter(function (b) { return b !== t && b.ticker === t.ticker && at(b.date) >= 0; }), mk = '';
+    others.forEach(function (b) { var k = at(b.date); mk += '<span class="pv__mk pv__mk--other" style="left:' + X(k).toFixed(2) + '%;top:' + Y(C[k]).toFixed(2) + '%"></span>'; });
+    var k0 = at(t.date);
+    if (k0 >= 0) mk += '<span class="pv__mk pv__mk--this" style="left:' + X(k0).toFixed(2) + '%;top:' + Y(C[k0]).toFixed(2) + '%"></span>';
+    var q = quote(t.ticker), sb = since(t), last = q ? q.last : C[n - 1], lastD = q && q.asof ? q.asof : D[n - 1];
+    return '<div class="pv__head"><span class="pv__price">' + p2(last) + '</span>' +
+        (sb != null ? '<span class="pv__chg ' + (sb < 0 ? 'neg' : 'pos') + '">' + signPct(sb) + ' since buy</span>' : '') +
+        '<span class="pv__sub">Close, ' + day(isoOf(lastD)) + ' · last 2 months</span></div>' +
+      '<button type="button" class="pv__plot" data-chart="' + esc(t.id) + '" aria-label="' + esc(t.ticker) + ' price, last 2 months. Open the full chart">' +
+        '<span class="pv__area"><svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">' +
+          '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="pv__s0 ' + dir + '"/><stop offset="1" class="pv__s1 ' + dir + '"/></linearGradient></defs>' +
+          grid + '<path fill="url(#' + gid + ')" d="' + line + 'L1000 100L0 100Z"/><path class="pv__line ' + dir + '" d="' + line + '"/>' +
+          (paidIn ? '<line class="pv__paid" x1="0" x2="1000" y1="' + Y(t.price).toFixed(2) + '" y2="' + Y(t.price).toFixed(2) + '"/>' : '') +
+        '</svg>' + mk + ylab + xlab + '</span></button>' +
+      '<div class="pv__legend">' +
+        (k0 >= 0 ? '<span><i class="lg lg--this"></i>This buy, ' + day(t.date) + '</span>' : '') +
+        (others.length ? '<span><i class="lg lg--other"></i>' + otherBuysLabel(t, others) + '</span>' : '') +
+        (paidIn ? '<span><i class="lg lg--paid"></i>Price paid ' + p2(t.price) + '</span>' : '') +
+      '</div>' + (cmp ? '' : '<p class="fine">' + mismatchNote(t) + '</p>');
   }
   function bodyHtml(t) {
     var sp = stakePct(t), sb = since(t), q = quote(t.ticker), lag = t.filedAt ? daysApart(t.date, t.filedAt.slice(0, 10)) : null;
@@ -314,7 +366,7 @@
       ['Filed with SEC', t.filedAt ? et(t.filedAt) : null, lag != null ? (lag === 0 ? 'same day' : lag + (lag === 1 ? ' day' : ' days') + ' after the trade') : ''],
       ['Price paid', t.price ? p2(t.price) : null, t.shares ? num(t.shares) + ' shares' : ''],
       ['Stake after', t.ownedAfter != null ? num(t.ownedAfter) + ' sh' : null, sp === Infinity ? 'new position' : sp != null ? '+' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% from this buy' : ''],
-      ['Fell before buy', t.dip ? '<span class="neg">−' + t.dip.pct + '%</span>' : null, t.dip ? 'vs ' + esc(t.dip.base) : ''],
+      ['Fell before buy', t.dip && comparable(t) ? '<span class="neg">−' + t.dip.pct + '%</span>' : null, t.dip ? 'vs ' + esc(t.dip.base) : ''],
       ['Since the buy', sb != null ? '<span class="' + (sb < 0 ? 'neg' : 'pos') + '">' + signPct(sb) + '</span>' : null, q ? 'close ' + p2(q.last) + ', ' + day(isoOf(q.asof)) : ''],
       ['Last close', q ? p2(q.last) : null, q ? signPct(q.chg) + ' that day' : ''],
       ['52-week range', q && q.lo ? p2(q.lo) + ' – ' + p2(q.hi) : null, ''],
@@ -325,9 +377,9 @@
       '<p class="headline">' + avatar(t.insider) + '<strong>' + esc(t.insider) + '</strong>, ' + esc(t.title) + ', bought <strong>' + money(t.value) +
       '</strong> of ' + esc(t.company) + ' stock' + (t.price ? ' at ' + p2(t.price) + ' a share' : '') + '.</p>' +
       '<dl class="kv">' + kv.map(function (k) { return '<div><dt>' + k[0] + '</dt><dd>' + k[1] + (k[2] ? '<small>' + k[2] + '</small>' : '') + '</dd></div>'; }).join('') + '</dl>' +
-      '<div class="mini">' + miniChart(t) + '<div style="display:grid;gap:8px">' +
+      miniChart(t) + '<div class="pv__btns">' +
       '<button type="button" class="btn btn--fill" data-chart="' + esc(t.id) + '">Full chart</button>' +
-      '<button type="button" class="btn btn--soft" data-watch="' + esc(t.ticker) + '" aria-pressed="' + w + '">' + (w ? '★ Watching' : '☆ Watch') + '</button></div></div>' +
+      '<button type="button" class="btn btn--soft" data-watch="' + esc(t.ticker) + '" aria-pressed="' + w + '">' + (w ? '★ Watching' : '☆ Watch') + '</button></div>' +
       '<details class="more-d" data-more="' + esc(t.id) + '"><summary>Know more <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>' +
       '<div class="more-d__body" id="m-' + esc(t.id) + '"></div></details></div>';
   }
@@ -631,7 +683,7 @@
     $('sh-ranges').innerHTML = RANGES.map(function (r) {
       return '<button type="button" class="chip' + (r[0] === sh.range ? ' is-on' : '') + '" data-r="' + r[0] + '" aria-pressed="' + (r[0] === sh.range) + '">' + r[0] + '</button>';
     }).join('');
-    $('sh-chart').innerHTML = '';
+    $('sh-chart').innerHTML = ''; $('sh-legend').innerHTML = '';
     getSeries(t.ticker).then(function (s) {
       if (sh.trade !== t) return;
       if (!s) { $('sh-chart').innerHTML = '<div class="empty">Price history isn\'t available for ' + esc(t.ticker) + '.</div>'; $('sh-readout').innerHTML = ''; $('sh-stats').innerHTML = ''; return; }
@@ -670,7 +722,7 @@
     var D = s.d.slice(i0), C = s.c.slice(i0), n = D.length;
     var buys = TRADES.filter(function (x) { return x.ticker === t.ticker && x.price && epoch(x.date) >= D[0]; });
     var W = Math.round(Math.max(320, Math.min(720, $('sh-chart').clientWidth || 640))), H = W < 500 ? 240 : 300, L = 8, R = 62, T = 18, B = 28; // 1 SVG unit = 1 px, so labels stay readable on phones
-    var lo = Math.min.apply(null, C), hi = Math.max.apply(null, C), inR = t.price && epoch(t.date) >= D[0];
+    var cmp = comparable(t), lo = Math.min.apply(null, C), hi = Math.max.apply(null, C), inR = cmp && t.price && epoch(t.date) >= D[0];
     if (inR) { lo = Math.min(lo, t.price); hi = Math.max(hi, t.price); }
     var pad = (hi - lo) * 0.1 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
     function PX(i) { return L + (n === 1 ? 0 : i / (n - 1)) * (W - L - R); }
@@ -690,8 +742,8 @@
     var marks = '', sel = '';
     buys.forEach(function (b) {
       var k = at(epoch(b.date)), cx = xs[k], cy = ys[k];
-      if (b !== t) { marks += '<circle class="pc-mk pc-in" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="5"><title>' + esc(b.insider) + ' bought ' + money(b.value) + ' at ' + p2(b.price) + ' on ' + day(b.date, true) + '</title></circle>'; return; }
-      var txt = 'Bought ' + money(b.value) + ' @ ' + p2(b.price), w = txt.length * 6.7 + 20, h = 26, tx = Math.max(L, Math.min(W - R - w - 4, cx - w / 2)), above = cy - 46 > T, ty = above ? cy - 46 : cy + 18;
+      if (b !== t) { marks += '<circle class="pc-mk pc-in" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="5.5"/>'; return; }
+      var txt = 'This buy: ' + money(b.value) + (cmp ? ' @ ' + p2(b.price) : ''), w = txt.length * 6.7 + 20, h = 26, tx = Math.max(L, Math.min(W - R - w - 4, cx - w / 2)), above = cy - 46 > T, ty = above ? cy - 46 : cy + 18;
       sel = '<g class="pc-in"><line class="pc-stem" x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="' + cy.toFixed(1) + '" y2="' + (above ? ty + h : ty).toFixed(1) + '"/>' +
         '<rect class="pc-tag" x="' + tx.toFixed(1) + '" y="' + ty.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h + '" rx="8"/><text class="pc-tagtxt" x="' + (tx + w / 2).toFixed(1) + '" y="' + (ty + 17).toFixed(1) + '" text-anchor="middle">' + esc(txt) + '</text>' +
         '<circle class="pc-halo" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="12"/><circle class="pc-sel" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="6.5"/></g>';
@@ -706,10 +758,14 @@
     var svg = box.querySelector('svg'), clip = $('pcc-r');
     if (!REDUCED) { var t0 = performance.now(); (function grow(now) { var k = Math.max(0, Math.min(1, (now - t0) / 700)), e = 1 - Math.pow(1 - k, 3); clip.setAttribute('width', (W * e).toFixed(1)); if (k < 1) requestAnimationFrame(grow); else svg.classList.add('is-drawn'); })(t0); }
     else svg.classList.add('is-drawn');
-    $('sh-readout').innerHTML = '<span id="ro-d"></span><span class="readout__p" id="ro-p"></span><span id="ro-c"></span>';
-    var cur = n - 1, curG = $('pc-cur'), dot = curG.querySelector('.pc-dot');
+    $('sh-readout').innerHTML = '<span id="ro-d"></span><span class="readout__p" id="ro-p"></span><span id="ro-c"></span><span class="readout__b" id="ro-b"></span>';
+    var cur = n - 1, curG = $('pc-cur'), dot = curG.querySelector('.pc-dot'), byK = {};
+    buys.forEach(function (b) { var k = at(epoch(b.date)); (byK[k] = byK[k] || []).push(b); });
     function read(k, live) {
-      var v = C[k], sb = t.price ? (v / t.price - 1) * 100 : null;
+      var v = C[k], sb = cmp && t.price ? (v / t.price - 1) * 100 : null, bk = byK[k];
+      $('ro-b').innerHTML = bk ? bk.map(function (b) {  // a buy on this day: say who bought what
+        return '<i class="lg ' + (b === t ? 'lg--this' : 'lg--other') + '"></i>' + esc(b.insider) + ' bought ' + money(b.value) + (comparable(b) ? ' at ' + p2(b.price) : '') + ' on ' + day(b.date);
+      }).join('<br>') : '';
       $('ro-d').textContent = (live ? '' : 'Close, ') + day(isoOf(D[k]), true);
       roll($('ro-p'), p2(v), live ? 200 : 600);
       if (sb != null) { $('ro-c').className = sb < 0 ? 'neg' : 'pos'; roll($('ro-c'), signPct(sb) + ' vs buy price', live ? 200 : 600); }
@@ -717,18 +773,28 @@
     }
     function idx(ev) { var r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * W; return Math.max(0, Math.min(n - 1, Math.round((x - L) / (W - L - R) * (n - 1)))); }
     svg.addEventListener('pointermove', function (e) { var k = idx(e); if (k !== cur) { cur = k; read(k, true); } });
-    svg.addEventListener('pointerdown', function (e) { cur = idx(e); read(cur, true); });
+    svg.addEventListener('pointerdown', function (e) {  // a tap snaps to a buy dot within 2 days, since dots are small targets
+      var k = idx(e), near = Object.keys(byK).map(Number).filter(function (b) { return Math.abs(b - k) <= 2; }).sort(function (a, b) { return Math.abs(a - k) - Math.abs(b - k); })[0];
+      cur = near != null ? near : k; read(cur, true);
+    });
     svg.addEventListener('pointerleave', function () { cur = n - 1; read(cur, false); });
     svg.addEventListener('keydown', function (e) {
       if (e.key === 'ArrowLeft') cur = Math.max(0, cur - 1); else if (e.key === 'ArrowRight') cur = Math.min(n - 1, cur + 1); else return;
       e.preventDefault(); read(cur, true);
     });
     read(n - 1, false);
-    var q = quote(t.ticker), sb = q && t.price ? (q.last / t.price - 1) * 100 : null;
+    var q = quote(t.ticker), sb = cmp && q && t.price ? (q.last / t.price - 1) * 100 : null;
     $('sh-stats').innerHTML = [t.price ? ['Price paid', p2(t.price)] : null, ['Latest close', q ? p2(q.last) : p2(C[n - 1])],
-      sb != null ? ['Since buy', signPct(sb), sb < 0 ? 'neg' : 'pos'] : null, t.dip ? ['Fell before buy', '−' + t.dip.pct + '%', 'neg'] : null]
+      sb != null ? ['Since buy', signPct(sb), sb < 0 ? 'neg' : 'pos'] : null, t.dip && cmp ? ['Fell before buy', '−' + t.dip.pct + '%', 'neg'] : null]
       .filter(Boolean).map(function (x) { return '<div><span class="k">' + x[0] + '</span><div class="v ' + (x[2] || '') + '" data-roll="' + esc(x[1]) + '"></div></div>'; }).join('');
     Array.prototype.forEach.call($('sh-stats').querySelectorAll('[data-roll]'), function (el) { roll(el, el.getAttribute('data-roll'), 700); });
+    // Legend: say what every mark on the chart is.
+    var otherIn = buys.filter(function (b) { return b !== t; });
+    $('sh-legend').innerHTML = (buys.indexOf(t) >= 0 ? '<span><i class="lg lg--this"></i>This buy, ' + day(t.date) + '</span>' : '') +
+      (otherIn.length ? '<span><i class="lg lg--other"></i>' + otherBuysLabel(t, otherIn) + '</span>' : '') +
+      (paidY != null ? '<span><i class="lg lg--paid"></i>Price paid ' + p2(t.price) + '</span>' : '') +
+      (buys.length ? '<span class="lg__hint">Move along the chart, or tap a dot, to see each buy.</span>' : '');
+    if (!cmp) $('sh-note').innerHTML = mismatchNote(t);
   }
   $('sh-ranges').addEventListener('click', function (e) {
     var b = e.target.closest('[data-r]'); if (!b) return; sh.range = b.getAttribute('data-r'); drawSheet();
