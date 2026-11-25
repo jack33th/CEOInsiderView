@@ -59,6 +59,11 @@ link beats the remembered tab. The search box is deliberately not remembered (a 
 like missing data). Invalid saved values fall back to defaults; the site works with storage blocked.
 Owner wants the site to remember options and preferences: persist any new setting the same way.
 
+## Testing rule (learned 2026-11-25)
+Insider and Congress rows share `.row__head`. A layout change for one broke the other on phones
+(the score removal made Congress initials overlap names). Any row/layout change: check BOTH tabs at
+375 px and 1280 px before shipping.
+
 ## Leave out
 Guesses at why a CEO bought, more tabs, a "trending" page. Not needed yet: a database, user
 accounts, React or another framework, paid data feeds.
