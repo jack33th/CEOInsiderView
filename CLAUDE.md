@@ -65,6 +65,9 @@ Insider and Congress rows share `.row__head`. A layout change for one broke the 
 375 px and 1280 px before shipping.
 Run it: `node tests/devserver.js` (needs SEC_USER_AGENT), then `node tests/ui_check.js` (6 widths x 2 tabs;
 fails on "—", undefined/NaN/null, "nightly/next update", overlapping rows, sideways scroll, page errors).
+Any chart change: also run `node tests/chart_check.js` (every buy's preview chart + full chart at 1M/3M/6M/1Y,
+phone and laptop; fails on NaN, oval or stray dots, colliding labels, legend not matching what's drawn).
+Last run 2026-11-25: 436 previews + 1,744 full-chart renders PASS; a deliberately broken legend failed it.
 
 Phase 1 of the polish spec (nothing blank, nothing ambiguous) shipped 2026-11-25: rows and ticker show
 "since buy", missing values are omitted (never "—"), header pill = Live / Checked Xm ago / Saved X ago.
