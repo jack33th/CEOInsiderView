@@ -59,6 +59,31 @@ link beats the remembered tab. The search box is deliberately not remembered (a 
 like missing data). Invalid saved values fall back to defaults; the site works with storage blocked.
 Owner wants the site to remember options and preferences: persist any new setting the same way.
 
+## Testing rule (learned 2026-11-25)
+Insider and Congress rows share `.row__head`. A layout change for one broke the other on phones
+(the score removal made Congress initials overlap names). Any row/layout change: check BOTH tabs at
+375 px and 1280 px before shipping.
+Run it: `node tests/devserver.js` (needs SEC_USER_AGENT), then `node tests/ui_check.js` (6 widths x 2 tabs;
+fails on "—", undefined/NaN/null, "nightly/next update", overlapping rows, sideways scroll, page errors).
+Any chart change: also run `node tests/chart_check.js` (every buy's preview chart + full chart at 1M/3M/6M/1Y,
+phone and laptop; fails on NaN, oval or stray dots, colliding labels, legend not matching what's drawn).
+Last run 2026-11-25: 436 previews + 1,744 full-chart renders PASS; a deliberately broken legend failed it.
+
+Phase 1 of the polish spec (nothing blank, nothing ambiguous) shipped 2026-11-25: rows and ticker show
+"since buy", missing values are omitted (never "—"), header pill = Live / Checked Xm ago / Saved X ago.
+Phases 2 (identity) and 3 (finish) in docs/superpowers/specs/2026-11-25-insider-view-polish-and-trust-design.md.
+
+Charts (2026-11-25): the row's preview chart is Yahoo-style (price + since-buy header, right price scale,
+dates, area fill, round HTML markers, legend; tap opens the full chart). The full chart has a legend
+(this buy = accent dot, other CEO buys at the company = blue dots, dashed = price paid) and scrubbing or
+tapping a buy day shows who bought what. Phase 2 note: if the accent turns blue, give "other buys" a
+different colour so the two kinds of dot stay distinct.
+Price guard: `comparable(t)` = price paid within 15% of that day's close (90% of 3,425 CEO buys are within
+10%). Otherwise (second share class like BH Class A/B averaged in one filing, ADRs, placements, splits)
+since-buy, fell-before-buy, the dip filter and the paid line are left out, with a note saying why.
+Root-cause follow-up: parse_form4 / api/live.js sum a day's buys across share classes; split them by
+security title.
+
 ## Leave out
 Guesses at why a CEO bought, more tabs, a "trending" page. Not needed yet: a database, user
 accounts, React or another framework, paid data feeds.
