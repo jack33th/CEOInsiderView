@@ -482,7 +482,9 @@
   }
 
   /* =================== live feed (/api/live) =================== */
-  var lastCheck = 0, liveOk = false, liveFailed = false;
+  // liveFailed shows the summary note; it needs two failures in a row, so one network blip doesn't.
+  // liveError keeps the reason the server gave, shown when the pill is tapped.
+  var lastCheck = 0, liveOk = false, liveFailed = false, liveFails = 0, liveError = '';
   function savedAt() { return DATA.updated ? Date.parse(DATA.updated.length === 10 ? DATA.updated + 'T12:00:00Z' : DATA.updated) : 0; }
   // One honest label: "Live" only if the SEC check answered in the last 2 minutes.
   function freshness() {
@@ -499,8 +501,11 @@
   }
   function poll() {
     if (location.protocol.indexOf('http') !== 0) { liveLabel(); return; }
-    fetch('api/live', { cache: 'no-store' }).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (j) {
-      liveOk = true; lastCheck = Date.parse(j.checkedAt) || Date.now();
+    fetch('api/live', { cache: 'no-store' }).then(function (r) {
+      if (r.ok) return r.json();
+      return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.error || 'HTTP ' + r.status); });
+    }).then(function (j) {
+      liveOk = true; liveFails = 0; liveError = ''; lastCheck = Date.parse(j.checkedAt) || Date.now();
       var have = {}; TRADES.forEach(function (t) { have[t.accession || t.id] = 1; have[t.ticker + '|' + t.date + '|' + t.shares] = 1; });
       var added = (j.trades || []).filter(function (t) {
         return t && t.ticker && t.date && t.type !== 'sell' && !have[t.accession || t.id] && !have[t.ticker + '|' + t.date + '|' + t.shares];
@@ -517,7 +522,13 @@
       var l = $('live'); l.classList.remove('ping'); void l.offsetWidth; l.classList.add('ping');
       liveLabel();
       if (liveFailed) { liveFailed = false; renderSummary(); }
-    }).catch(function () { liveOk = false; if (!liveFailed) { liveFailed = true; renderSummary(); } liveLabel(); });
+    }).catch(function (e) {
+      liveOk = false; liveFails++;
+      liveError = e && e.message ? e.message : 'the server did not answer';
+      if (liveFails === 1) setTimeout(poll, 5000);          // retry once quickly before telling anyone
+      else if (!liveFailed) { liveFailed = true; renderSummary(); }
+      liveLabel();
+    });
   }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) document.title = 'CEO Insider View'; });
 
@@ -833,7 +844,7 @@
     if ((el = e.target.closest('#bell'))) { toggleBell(); return; }
     if ((el = e.target.closest('[data-f]'))) { st.f = el.getAttribute('data-f'); store.set('cib_filter', st.f); st.limit = 40; renderFilters(); renderFeed(); return; }
     if ((el = e.target.closest('[data-cf]'))) { cst.f = el.getAttribute('data-cf'); store.set('cib_cfilter', cst.f); cst.limit = 40; renderCongress(); return; }
-    if (e.target.closest('#live')) { toast(freshness().on ? 'Checking the SEC every 30 seconds. Last check ' + ago(lastCheck) + '.' : lastCheck ? 'The last successful SEC check was ' + ago(lastCheck) + '. Showing what we have.' : 'Showing saved data from ' + et(new Date(savedAt() || Date.now()).toISOString()) + '.'); }
+    if (e.target.closest('#live')) { toast(freshness().on ? 'Checking the SEC every 30 seconds. Last check ' + ago(lastCheck) + '.' : (liveError ? 'Live check failed: ' + liveError + ' ' : '') + (lastCheck ? 'Last successful check ' + ago(lastCheck) + '.' : 'Showing saved data from ' + et(new Date(savedAt() || Date.now()).toISOString()) + '.')); }
   });
   document.addEventListener('toggle', function (e) {
     var d = e.target;
