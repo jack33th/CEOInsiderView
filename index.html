@@ -39,7 +39,6 @@
       </label>
       <select id="sort" class="select" aria-label="Sort">
         <option value="new">Newest filed</option>
-        <option value="score">Highest score (beta)</option>
         <option value="value">Largest</option>
         <option value="dip">Biggest drop</option>
       </select>
@@ -56,7 +55,7 @@
       <div class="about__body">
         <p><strong>Where the data comes from.</strong> Every buy is read from the CEO's SEC Form 4. Only open-market purchases count (transaction code P). Free shares, option exercises and tax sales are left out. Same-day purchases are added up at the average price.</p>
         <p><strong>How fast.</strong> This page checks the SEC every 30 seconds. The law gives insiders 2 business days to file, so a buy can be up to 2 days old when it appears. Nobody legally sees it sooner.</p>
-        <p><strong>The score is experimental.</strong> It's our own formula, built from facts in the filing: size, how much it grew the CEO's stake, how far the stock had fallen, other insiders buying, a first buy in a year, and whether it was pre-planned. Each part links to its source. What it hasn't done yet is pass a test: we haven't checked whether high-scoring buys actually did better than CEO buys in general. Until that test is run and published here, the list is sorted by newest, and the score is a way to see the facts at a glance, not a prediction. If the test fails, the score is changed or removed.</p>
+        <p><strong>Why there's no score.</strong> We used to rank buys with a 0 to 100 score. We tested it on 2,116 CEO buys from 2025 and 2026, and buys that scored high did <em>worse</em> afterwards, so we removed it. Each buy now shows the facts from its filing, marked ✓ or ! where our test found they went with better or worse results. <a class="src" href="https://github.com/jack33th/CEOInsiderView/blob/main/scripts/score_test/README.md" target="_blank" rel="noopener noreferrer">Read the test</a></p>
         <p><strong>Research behind it.</strong>
           <a class="src" href="https://www.interactivebrokers.com/campus/traders-insight/securities/stocks/what-corporate-insider-buying-can-tell-investors-evidence-from-academic-research/" target="_blank" rel="noopener noreferrer">Insider buying evidence (Interactive Brokers)</a>
           <a class="src" href="https://www.nber.org/papers/w16454.pdf" target="_blank" rel="noopener noreferrer">Routine vs unusual trades (NBER)</a>

@@ -18,16 +18,12 @@ by a GitHub Action running `scripts/update_data.py` (hourly live feed, daily re-
 - The owner is fairly new to git/PRs: explain steps plainly, and give honest pushback (see
   their preferences), not agreement by default.
 
-## The score: EXPERIMENTAL (decided 2026-11-24)
-- Weights are educated guesses from research, not tested. `SCORE_EXPERIMENTAL = true` in `app.js`
-  keeps rings neutral grey, labels it beta, keeps it out of headline stats; default sort = newest.
-- **Pass test:** using 12 months of CEO buys + prices, buys scoring 60+ must beat both the median
-  CEO buy and SPY at 30 and 90 days, with at least 30 buys per group. Also report each factor on
-  its own; a single factor may be worth keeping as a filter even if the total fails.
-- **No overfitting:** if weights are tuned, tune on the first ~8 months and judge only on the last ~4.
-- If it fails: change the weights (with the holdout rule) or remove the score. Don't keep it just
-  because it makes the site look smarter.
-- A score built from 3 of 5 factors is not comparable to one from 5; keep showing factor coverage.
+## The score: REMOVED (owner decided 2026-11-25)
+The 0-100 score failed its test (below) and is gone from the site: no rings, no "Score 60+" filter,
+no score sort, no score alerts. The "Several insiders" filter went too: the site only knows CEO buys,
+so it mostly counted a CEO buying again. "Know more" shows **The facts** instead, marked ✓/! only where
+the test found the same pattern in both years. Alerts now fire for watchlist companies only.
+**Rule: any new signal must pass `scripts/score_test/` (point-in-time, holdout year) before it ships.**
 
 ## Score test result (2026-11-24): FAILED
 See `scripts/score_test/README.md`. 2,116 CEO buys (2025-01 to 2026-08), point-in-time, returns from
@@ -36,8 +32,7 @@ for all CEO buys; company-level 95% range of the gap -21% to -3%). Holds against
 Up to 65 points go to features that went with worse returns (40%+ drop, $1M+ size, the site's
 "cluster", which mostly counts a CEO buying again). Consistent in both years: 10b5-1 and serial buying
 (4+ in a year) are red flags; first-in-a-year and 2+ other insiders (any rank) are mildly positive.
-**Decision pending with the owner:** remove the score (recommended) or rebuild it (tune on 2025,
-judge only on 2026). Don't change the score or its display until the owner decides.
+Owner chose to remove it (2026-11-25).
 
 ## Order of work
 1. ~~Check new fields on real filings~~ done: parser verified on 210 real filings.

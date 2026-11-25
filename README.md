@@ -24,24 +24,17 @@ You never edit the Action-written files by hand.
 
 Secrets stay in GitHub/Vercel settings only: `SEC_USER_AGENT` (name + email, required by the SEC) and optional `NTFY_TOPIC` for phone alerts. Never put them in a file.
 
-## Score (0 to 100), experimental
+## No score (removed 2026-11-24)
 
-Our own formula, built only from facts in the filing. Every point is shown with its source when you open a buy.
+The site used to rank buys with a 0 to 100 "conviction" score built from size, stake growth, the drop
+before the buy, other buys nearby, a first buy in a year, and 10b5-1 plans. We tested it on 2,116 CEO
+buys filed in 2025 and 2026 (`scripts/score_test/`). Buys scoring 60+ did significantly *worse* than other
+CEO buys over 90 days, in both years, so the score was removed.
 
-**Status: experimental.** The weights below are educated guesses from published research, not fitted or tested on this site's data. Until it passes a test, the site sorts by newest by default, the score isn't a headline number, and it's labelled "beta" wherever it appears.
-
-**What would make it non-experimental:** using 12 months of CEO buys and the prices after them, buys scoring 60+ must beat both the median CEO buy and SPY over 30 and 90 days, across enough buys (at least 30 in each group) that the gap isn't luck. If they don't, the weights get changed or the score is removed.
-
-| Factor | Points |
-| --- | --- |
-| Size of the buy ($25K = 0, $5M+ = 25) | 0 to 25 |
-| How much the stake grew | 0 to 25 |
-| Drop from the 90-day high before the buy | 0 to 20 |
-| Other insiders buying within 30 days | 0 to 20 |
-| First CEO buy at this company in 12 months | 0 to 10 |
-| Pre-scheduled under a 10b5-1 plan | minus 15 |
-
-Factors that can't be checked yet are left out and the rest is scaled to 100, so missing data doesn't pull a score down. It is not proven to predict returns: the Track record panel measures that as buys turn 30 days old.
+Each buy now shows the same facts plainly. Where the test found a pattern in both years, the fact is
+marked: ✓ for slightly better (first CEO buy in a year), ! for worse (10b5-1 pre-planned, 4+ CEO buys in a
+year, a 40%+ drop before the buy). These describe past results, not predictions. Any new signal must pass
+the same test before it appears on the site.
 
 ## How fast can this get?
 
