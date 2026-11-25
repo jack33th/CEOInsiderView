@@ -127,20 +127,22 @@
     // mark: 'good' = went with better results in the test, 'flag' = went with worse results, '' = neutral
     out.push({ mark: '', t: 'Size: ' + money(t.value) + ' of their own money',
       how: (t.shares && t.price ? num(t.shares) + ' shares × ' + p2(t.price) + '. ' : '') + 'In our test, bigger buys did not do better.', src: src, res: TEST });
-    out.push({ mark: '', t: sp == null ? 'Stake growth: not in this filing' : sp === Infinity ? 'Stake growth: a brand-new position' : 'Stake growth: +' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% more shares',
-      how: sp == null ? 'Older rows lack the "shares owned after" figure. The next update adds it.' : 'Owned ' + num(t.ownedAfter) + ' shares directly after the buy, up from ' + num(t.ownedAfter - t.shares) + '.', src: sp == null ? null : src });
-    out.push({ mark: dp >= 40 ? 'flag' : '', t: dp != null ? 'Bought ' + dp + '% below the ' + (t.dip.base || 'recent peak') : 'Drop before the buy: unknown',
-      how: dp != null ? 'Price paid ' + p2(t.price) + ' compared with the highest close in the 90 days before.' + (dp >= 40 ? ' In our test, buys after a 40%+ drop did worse than other CEO buys over 90 days.' : '') : 'No price history for this ticker yet.',
-      src: dp != null ? { label: 'Daily closes (' + ((SPARK[t.ticker] || {}).s || 'price feed') + ')', url: 'https://finance.yahoo.com/quote/' + encodeURIComponent(t.ticker) + '/history' } : null, res: dp >= 40 ? TEST : null });
+    // Stake: a row from the current parser always has an ownedAfter key. null there means the filing
+    // reported no direct holding (shares held through a trust or company). No key = an older row: say nothing.
+    if (sp != null) out.push({ mark: '', t: sp === Infinity ? 'Stake growth: a brand-new position' : 'Stake growth: +' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% more shares',
+      how: 'Owned ' + num(t.ownedAfter) + ' shares directly after the buy, up from ' + num(t.ownedAfter - t.shares) + '.', src: src });
+    else if ('ownedAfter' in t && t.ownedAfter === null) out.push({ mark: '', t: 'Shares held indirectly',
+      how: 'The filing reports these shares as held indirectly (for example through a trust), so stake growth isn\'t shown.', src: src });
+    if (dp != null) out.push({ mark: dp >= 40 ? 'flag' : '', t: 'Bought ' + dp + '% below the ' + (t.dip.base || 'recent peak'),
+      how: 'Price paid ' + p2(t.price) + ' compared with the highest close in the 90 days before.' + (dp >= 40 ? ' In our test, buys after a 40%+ drop did worse than other CEO buys over 90 days.' : ''),
+      src: { label: 'Daily closes (' + ((SPARK[t.ticker] || {}).s || 'price feed') + ')', url: 'https://finance.yahoo.com/quote/' + encodeURIComponent(t.ticker) + '/history' }, res: dp >= 40 ? TEST : null });
     if (t.prior12 != null) {
       var serial = t.prior12 >= 4;
       out.push({ mark: t.prior12 === 0 ? 'good' : serial ? 'flag' : '', t: t.prior12 === 0 ? 'First CEO buy here in 12 months' : t.prior12 + ' earlier CEO buy' + (t.prior12 > 1 ? 's' : '') + ' in the last 12 months',
         how: 'Counted from every Form 4 filed for this company in the past year. ' + (t.prior12 === 0 ? 'In our test, a first buy in a year did slightly better than average.' : serial ? 'In our test, frequent buyers (4+ a year) did worse than average.' : ''),
         src: null, res: t.prior12 === 0 ? RES.unusual : serial ? TEST : null });
-    } else {
-      out.push({ mark: '', t: 'Buying history: arrives with the nightly update', how: 'Needs the 12-month filing history, which the daily update collects.', src: null });
     }
-    if (again) out.push({ mark: '', t: 'The CEO bought ' + (again + 1) + ' times within 30 days', how: 'Other buys by this CEO listed here. Buys by other insiders aren\'t tracked yet.', src: null });
+    if (again) out.push({ mark: '', t: 'The CEO bought ' + (again + 1) + ' times within 30 days', how: 'Counted from the buys listed on this site. Buys by other insiders aren\'t included.', src: null });
     if (t.plan) out.push({ mark: 'flag', t: 'Pre-scheduled under a 10b5-1 plan', how: 'The filer ticked the 10b5-1 box, so the buy was arranged in advance, not decided this week. In our test, pre-planned buys did clearly worse.', src: src, res: RES.plan });
     return out;
   }
@@ -200,9 +202,11 @@
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>' +
       (NOTIFY ? 'Alerts on' : 'Get alerts') + '</button>';
   }
-  function quoteHtml(tk) {
-    var q = quote(tk);
-    return q ? '<span class="q ' + (q.chg >= 0 ? 'pos' : 'neg') + '">' + p2(q.last) + ' ' + (q.chg >= 0 ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</span>' : '';
+  // The row's second number: how the stock has moved since the CEO bought (labelled), or the price paid.
+  function sinceHtml(t) {
+    var sb = since(t);
+    if (sb != null) return '<span class="q ' + (sb < 0 ? 'neg' : 'pos') + '">' + signPct(sb) + ' since buy</span>';
+    return t.price ? '<span class="q q--muted">paid ' + p2(t.price) + '</span>' : '';
   }
   function rowHtml(t) {
     var sp = stakePct(t), w = WATCH.indexOf(t.ticker) >= 0, open = !!st.open[t.id];
@@ -213,7 +217,7 @@
       '<button type="button" class="row__head" aria-expanded="' + open + '" aria-controls="b-' + esc(t.id) + '">' +
       '<span class="row__main"><span class="row__l1"><span class="row__co">' + esc(t.company) + '</span><span class="tk">' + esc(t.ticker) + '</span>' + (w ? '<span class="star" title="On your watchlist">★</span>' : '') + '</span>' +
       '<span class="row__l2"><span>' + esc(t.insider) + '</span><span class="row__time">' + (t.filedAt ? 'Filed ' + ago(filedMs(t)) : 'Bought ' + day(t.date)) + '</span>' + stake + '</span></span>' +
-      '<span class="row__right"><span class="row__amt">' + money(t.value) + '</span>' + quoteHtml(t.ticker) + '</span></button>' +
+      '<span class="row__right"><span class="row__amt">' + money(t.value) + '</span>' + sinceHtml(t) + '</span></button>' +
       '<div class="row__body" id="b-' + esc(t.id) + '"><div class="row__inner">' + (open ? bodyHtml(t) : '') + '</div></div></article>';
   }
   function renderFeed() {
@@ -239,7 +243,8 @@
     var total = TRADES.reduce(function (a, t) { return a + t.value; }, 0), cos = {};
     TRADES.forEach(function (t) { cos[t.ticker] = 1; });
     var span = TRADES.length ? daysApart(TRADES.reduce(function (m, t) { return t.date < m ? t.date : m; }, TRADES[0].date), new Date().toISOString().slice(0, 10)) : 0;
-    $('summary').innerHTML = '<b id="s1"></b> CEO buys in ' + span + ' days · <b id="s2"></b> in total · <b id="s3"></b> companies';
+    $('summary').innerHTML = '<b id="s1"></b> CEO buys in ' + span + ' days · <b id="s2"></b> in total · <b id="s3"></b> companies' +
+      (liveFailed ? '<span class="summary__note">Live check unavailable; showing saved data.</span>' : '');
     roll($('s1'), String(TRADES.length), 800); roll($('s2'), money(total), 900); roll($('s3'), String(Object.keys(cos).length), 800);
   }
 
@@ -276,7 +281,7 @@
       var row = document.querySelector('.row[data-id="' + CSS.escape(t.id) + '"]');
       if (!row) return;
       var right = row.querySelector('.row__right');
-      if (right) right.innerHTML = '<span class="row__amt">' + money(t.value) + '</span>' + quoteHtml(t.ticker);
+      if (right) right.innerHTML = '<span class="row__amt">' + money(t.value) + '</span>' + sinceHtml(t);
       var mini = row.querySelector('[data-mini]');
       if (mini) mini.innerHTML = miniInner(t);
     });
@@ -289,7 +294,7 @@
   }
   function miniInner(t) {
     var s = SPARK[t.ticker];
-    if (!s || !s.c || s.c.length < 3) return '<p class="fine">' + (PX.wait[t.ticker] ? 'Loading price history…' : 'No price history for ' + esc(t.ticker) + ' yet.') + '</p>';
+    if (!s || !s.c || s.c.length < 3) return '<p class="fine">' + (PX.wait[t.ticker] ? 'Loading price history…' : 'Price history isn\'t available for ' + esc(t.ticker) + '.') + '</p>';
     var n = s.c.length, lo = Math.min.apply(null, s.c), hi = Math.max.apply(null, s.c), W = 300, H = 64;
     if (t.price) { lo = Math.min(lo, t.price); hi = Math.max(hi, t.price); }
     function X(i) { return 2 + i / (n - 1) * (W - 4); }
@@ -303,16 +308,18 @@
   }
   function bodyHtml(t) {
     var sp = stakePct(t), sb = since(t), q = quote(t.ticker), lag = t.filedAt ? daysApart(t.date, t.filedAt.slice(0, 10)) : null;
+    // Entries with no value are left out rather than shown as a dash.
     var kv = [
       ['Bought on', day(t.date, true), ''],
-      ['Filed with SEC', t.filedAt ? et(t.filedAt) : '—', lag != null ? (lag === 0 ? 'same day' : lag + (lag === 1 ? ' day' : ' days') + ' after the trade') : ''],
-      ['Price paid', p2(t.price), t.shares ? num(t.shares) + ' shares' : ''],
-      ['Stake after', t.ownedAfter != null ? num(t.ownedAfter) + ' sh' : '—', sp === Infinity ? 'new position' : sp != null ? '+' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% from this buy' : 'arrives with next update'],
-      ['Fell before buy', t.dip ? '<span class="neg">−' + t.dip.pct + '%</span>' : '—', t.dip ? 'vs ' + esc(t.dip.base) : ''],
-      ['Since the buy', sb != null ? '<span class="' + (sb < 0 ? 'neg' : 'pos') + '">' + signPct(sb) + '</span>' : '—', q ? 'last close ' + p2(q.last) : ''],
-      ['52-week range', q && q.lo ? p2(q.lo) + ' – ' + p2(q.hi) : '—', ''],
-      ['Pre-planned?', t.plan ? 'Yes (10b5-1)' : t.plan === false ? 'No' : '—', t.plan === false ? 'decided, not scheduled' : '']
-    ];
+      ['Filed with SEC', t.filedAt ? et(t.filedAt) : null, lag != null ? (lag === 0 ? 'same day' : lag + (lag === 1 ? ' day' : ' days') + ' after the trade') : ''],
+      ['Price paid', t.price ? p2(t.price) : null, t.shares ? num(t.shares) + ' shares' : ''],
+      ['Stake after', t.ownedAfter != null ? num(t.ownedAfter) + ' sh' : null, sp === Infinity ? 'new position' : sp != null ? '+' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% from this buy' : ''],
+      ['Fell before buy', t.dip ? '<span class="neg">−' + t.dip.pct + '%</span>' : null, t.dip ? 'vs ' + esc(t.dip.base) : ''],
+      ['Since the buy', sb != null ? '<span class="' + (sb < 0 ? 'neg' : 'pos') + '">' + signPct(sb) + '</span>' : null, q ? 'close ' + p2(q.last) + ', ' + day(isoOf(q.asof)) : ''],
+      ['Last close', q ? p2(q.last) : null, q ? signPct(q.chg) + ' that day' : ''],
+      ['52-week range', q && q.lo ? p2(q.lo) + ' – ' + p2(q.hi) : null, ''],
+      ['Pre-planned?', t.plan ? 'Yes (10b5-1)' : t.plan === false ? 'No' : null, t.plan === false ? 'decided, not scheduled' : '']
+    ].filter(function (k) { return k[1] != null; });
     var w = WATCH.indexOf(t.ticker) >= 0;
     return '<div class="row__pad">' +
       '<p class="headline">' + avatar(t.insider) + '<strong>' + esc(t.insider) + '</strong>, ' + esc(t.title) + ', bought <strong>' + money(t.value) +
@@ -335,22 +342,22 @@
     if (co) {
       var cap = co.sharesOut && q ? co.sharesOut * q.last : null;
       html += '<dl class="kv">' +
-        '<div><dt>Industry</dt><dd style="font-size:.875rem">' + esc(co.industry || '—') + '</dd></div>' +
-        '<div><dt>Exchange</dt><dd>' + esc(co.exchange || '—') + '</dd></div>' +
-        '<div><dt>Company value</dt><dd>' + (cap ? money(cap) : '—') + '<small>' + (cap ? num(co.sharesOut) + ' shares × last close' : 'shares outstanding not reported') + '</small></dd></div>' +
-        '<div><dt>This buy is</dt><dd>' + (cap ? (t.value / cap * 100 < 0.01 ? '<0.01' : (t.value / cap * 100).toFixed(2)) + '%' : '—') + '<small>of the company\'s value</small></dd></div></dl>';
+        (co.industry ? '<div><dt>Industry</dt><dd style="font-size:.875rem">' + esc(co.industry) + '</dd></div>' : '') +
+        (co.exchange ? '<div><dt>Exchange</dt><dd>' + esc(co.exchange) + '</dd></div>' : '') +
+        (cap ? '<div><dt>Company value</dt><dd>' + money(cap) + '<small>' + num(co.sharesOut) + ' shares × last close</small></dd></div>' +
+          '<div><dt>This buy is</dt><dd>' + (t.value / cap * 100 < 0.01 ? '<0.01' : (t.value / cap * 100).toFixed(2)) + '%<small>of the company\'s value</small></dd></div>' : '') + '</dl>';
       html += '<p class="why__src">Source: ' + srcLink({ label: 'SEC company profile', url: 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + co.cik }) + '</p>';
     } else {
-      html += '<p class="fine">' + (COMPANIES ? 'No company details for ' + esc(t.ticker) + ' yet. They arrive with the nightly update.' : 'Loading…') + '</p>';
+      html += '<p class="fine">' + (COMPANIES ? 'Company details aren\'t available for ' + esc(t.ticker) + '.' : 'Loading company details…') + '</p>';
     }
-    html += '</div><div><div class="sub-h">CEO trades at ' + esc(t.ticker) + ', last 12 months</div>';
+    html += '</div><div><div class="sub-h">' + (co && co.complete !== false && co.history ? 'CEO trades at ' + esc(t.ticker) + ', last 12 months' : 'CEO buys at ' + esc(t.ticker) + ' listed here') + '</div>';
     var hist = co && co.history ? co.history : TRADES.filter(function (x) { return x.ticker === t.ticker; }).map(function (x) {
       return { date: x.date, type: 'buy', value: x.value, price: x.price, insider: x.insider, url: x.url, plan: x.plan };
     });
     hist = hist.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
     var buys = hist.filter(function (h) { return h.type === 'buy'; }).length, sells = hist.length - buys;
     html += '<p class="fine" style="margin-bottom:8px">' + buys + ' buy' + (buys === 1 ? '' : 's') + ' and ' + sells + ' sale' + (sells === 1 ? '' : 's') +
-      (co ? '' : ' in our ' + (DATA.coverage ? 'current window' : 'data') + ' (full year arrives with the nightly update)') +
+      (co && co.history ? '' : ' on this site so far') +
       (sells > buys ? '. Note: more selling than buying this year.' : '') + '</p><div class="hist">' + hist.slice(0, 8).map(function (h) {
         return '<div class="hist__r"><span class="pill pill--' + h.type + '">' + (h.type === 'buy' ? 'Buy' : 'Sell') + '</span>' +
           '<span>' + day(h.date, true) + ' · ' + esc(h.insider) + (h.plan ? ' <span class="badge badge--plan">10b5-1</span>' : '') +
@@ -388,11 +395,7 @@
       (COMPANIES[k].history || []).forEach(function (h) { if (h.type === 'buy' && h.r30 != null && !TRADES.some(function (t) { return t.ticker === k && t.date === h.date; })) done.push(h); });
     });
     var el = $('track');
-    if (done.length < 8) {
-      el.innerHTML = '<h2 id="track-h">Track record</h2><p class="fine">Do CEO buys actually go up? This fills in as buys turn 30 days old: ' + done.length +
-        ' so far. Every buy is measured from the price the CEO paid, against the S&P 500 (SPY) over the same 30 days.</p>';
-      return;
-    }
+    if (done.length < 8) { el.innerHTML = ''; return; }  // an empty panel says nothing useful; it appears once 8 buys have 30-day results
     function med(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[Math.floor(a.length / 2)] : 0; }
     var r = done.map(function (t) { return t.r30; }), spy = done.filter(function (t) { return t.spy30 != null; }).map(function (t) { return t.spy30; });
     var winners = r.filter(function (x) { return x > 0; }).length, beat = done.filter(function (t) { return t.spy30 != null && t.r30 > t.spy30; }).length;
@@ -413,9 +416,9 @@
     var latest = TRADES.slice().sort(function (a, b) { return filedMs(b) - filedMs(a); }).slice(0, 16);
     if (!latest.length) { $('tape').hidden = true; return; }
     var one = latest.map(function (t) {
-      var q = quote(t.ticker);
+      var sb = since(t);  // same labelled number as the rows: the move since the CEO bought
       return '<button type="button" class="tick" data-jump="' + esc(t.id) + '"><b>' + esc(t.ticker) + '</b>' + money(t.value) +
-        (q ? ' <span class="' + (q.chg >= 0 ? 'up' : 'dn') + '">' + (q.chg >= 0 ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</span>' : '') + '</button>';
+        (sb != null ? ' <span class="' + (sb >= 0 ? 'up' : 'dn') + '">' + signPct(sb) + ' since buy</span>' : '') + '</button>';
     }).join('');
     $('tape-track').innerHTML = one + one.replace(/<button /g, '<button tabindex="-1" aria-hidden="true" ');
     TAPE.secs = Math.max(30, latest.length * 4);  // time for one full pass of the list
@@ -479,11 +482,20 @@
   }
 
   /* =================== live feed (/api/live) =================== */
-  var lastCheck = 0, liveOk = false;
+  var lastCheck = 0, liveOk = false, liveFailed = false;
+  function savedAt() { return DATA.updated ? Date.parse(DATA.updated.length === 10 ? DATA.updated + 'T12:00:00Z' : DATA.updated) : 0; }
+  // One honest label: "Live" only if the SEC check answered in the last 2 minutes.
+  function freshness() {
+    if (liveOk && Date.now() - lastCheck < 120000) return { on: true, text: 'Live' };
+    if (lastCheck) return { on: false, text: 'Checked ' + ago(lastCheck) };
+    if (savedAt()) return { on: false, text: 'Saved ' + ago(savedAt()) };  // short for phones; the exact time is in the tap message
+    return { on: false, text: 'Loading' };
+  }
   function liveLabel() {
-    var el = $('live');
-    el.classList.toggle('is-on', liveOk);
-    $('live-text').textContent = liveOk ? 'Live · ' + ago(lastCheck) : DATA.updated ? 'Updated ' + ago(Date.parse(DATA.updated.length === 10 ? DATA.updated + 'T12:00:00Z' : DATA.updated)) : 'Offline';
+    var f = freshness();
+    $('live').classList.toggle('is-on', f.on);
+    $('live-text').textContent = f.text;
+    if (savedAt()) $('live').title = 'Saved data from ' + et(new Date(savedAt()).toISOString());
   }
   function poll() {
     if (location.protocol.indexOf('http') !== 0) { liveLabel(); return; }
@@ -504,7 +516,8 @@
       }
       var l = $('live'); l.classList.remove('ping'); void l.offsetWidth; l.classList.add('ping');
       liveLabel();
-    }).catch(function () { liveOk = false; liveLabel(); });
+      if (liveFailed) { liveFailed = false; renderSummary(); }
+    }).catch(function () { liveOk = false; if (!liveFailed) { liveFailed = true; renderSummary(); } liveLabel(); });
   }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) document.title = 'CEO Insider View'; });
 
@@ -610,8 +623,8 @@
     $('sh-chart').innerHTML = '';
     getSeries(t.ticker).then(function (s) {
       if (sh.trade !== t) return;
-      if (!s) { $('sh-chart').innerHTML = '<div class="empty">No price history for ' + esc(t.ticker) + ' yet.</div>'; $('sh-readout').innerHTML = ''; $('sh-stats').innerHTML = ''; return; }
-      $('sh-note').textContent = s.full ? '' : 'Showing the last 2 months. Full history loads once the site is online.';
+      if (!s) { $('sh-chart').innerHTML = '<div class="empty">Price history isn\'t available for ' + esc(t.ticker) + '.</div>'; $('sh-readout').innerHTML = ''; $('sh-stats').innerHTML = ''; return; }
+      $('sh-note').textContent = s.full ? '' : 'Showing the last 2 months.';
       chart(t, s);
     });
   }
@@ -686,7 +699,7 @@
     var cur = n - 1, curG = $('pc-cur'), dot = curG.querySelector('.pc-dot');
     function read(k, live) {
       var v = C[k], sb = t.price ? (v / t.price - 1) * 100 : null;
-      $('ro-d').textContent = day(isoOf(D[k]), true) + (live ? '' : ' · latest');
+      $('ro-d').textContent = (live ? '' : 'Close, ') + day(isoOf(D[k]), true);
       roll($('ro-p'), p2(v), live ? 200 : 600);
       if (sb != null) { $('ro-c').className = sb < 0 ? 'neg' : 'pos'; roll($('ro-c'), signPct(sb) + ' vs buy price', live ? 200 : 600); }
       curG.style.opacity = live ? 1 : 0; curG.style.transform = 'translateX(' + xs[k].toFixed(1) + 'px)'; dot.setAttribute('cy', ys[k].toFixed(1));
@@ -701,9 +714,9 @@
     });
     read(n - 1, false);
     var q = quote(t.ticker), sb = q && t.price ? (q.last / t.price - 1) * 100 : null;
-    $('sh-stats').innerHTML = [['Price paid', p2(t.price)], ['Latest close', q ? p2(q.last) : p2(C[n - 1])],
-      ['Since buy', sb != null ? signPct(sb) : '—', sb != null ? (sb < 0 ? 'neg' : 'pos') : ''], ['Fell before buy', t.dip ? '−' + t.dip.pct + '%' : '—', t.dip ? 'neg' : '']]
-      .map(function (x) { return '<div><span class="k">' + x[0] + '</span><div class="v ' + (x[2] || '') + '" data-roll="' + esc(x[1]) + '"></div></div>'; }).join('');
+    $('sh-stats').innerHTML = [t.price ? ['Price paid', p2(t.price)] : null, ['Latest close', q ? p2(q.last) : p2(C[n - 1])],
+      sb != null ? ['Since buy', signPct(sb), sb < 0 ? 'neg' : 'pos'] : null, t.dip ? ['Fell before buy', '−' + t.dip.pct + '%', 'neg'] : null]
+      .filter(Boolean).map(function (x) { return '<div><span class="k">' + x[0] + '</span><div class="v ' + (x[2] || '') + '" data-roll="' + esc(x[1]) + '"></div></div>'; }).join('');
     Array.prototype.forEach.call($('sh-stats').querySelectorAll('[data-roll]'), function (el) { roll(el, el.getAttribute('data-roll'), 700); });
   }
   $('sh-ranges').addEventListener('click', function (e) {
@@ -744,7 +757,7 @@
       '<div><dt>Asset</dt><dd style="font-size:.875rem">' + esc(t.company || t.ticker) + '</dd></div>' +
       '<div><dt>Owner</dt><dd>' + esc(t.owner || 'Self') + '</dd></div>' +
       '<div><dt>Traded</dt><dd>' + day(t.traded, true) + '</dd></div>' +
-      '<div><dt>Made public</dt><dd>' + (t.filed ? day(t.filed, true) : '—') + (lag != null ? '<small>' + lag + ' days later' + (lag > 45 ? ', past the 45-day limit' : '') + '</small>' : '') + '</dd></div></dl>' +
+      (t.filed ? '<div><dt>Made public</dt><dd>' + day(t.filed, true) + (lag != null ? '<small>' + lag + ' days later' + (lag > 45 ? ', past the 45-day limit' : '') + '</small>' : '') + '</dd></div>' : '') + '</dl>' +
       '<p class="fine">Amount is a range. Members only have to report the bracket, not the exact figure.</p>' +
       '<div>' + (t.url ? srcLink({ label: 'Official ' + (t.role === 'Senate' ? 'Senate' : 'House') + ' filing', url: t.url }) : '') + (t.sources || []).map(srcLink).join('') + '</div></div>';
   }
@@ -820,7 +833,7 @@
     if ((el = e.target.closest('#bell'))) { toggleBell(); return; }
     if ((el = e.target.closest('[data-f]'))) { st.f = el.getAttribute('data-f'); store.set('cib_filter', st.f); st.limit = 40; renderFilters(); renderFeed(); return; }
     if ((el = e.target.closest('[data-cf]'))) { cst.f = el.getAttribute('data-cf'); store.set('cib_cfilter', cst.f); cst.limit = 40; renderCongress(); return; }
-    if (e.target.closest('#live')) { toast(liveOk ? 'Checking the SEC every 30 seconds. Last check ' + ago(lastCheck) + '.' : 'Live feed off here. Data last updated ' + $('live-text').textContent.replace('Updated ', '') + '.'); }
+    if (e.target.closest('#live')) { toast(freshness().on ? 'Checking the SEC every 30 seconds. Last check ' + ago(lastCheck) + '.' : lastCheck ? 'The last successful SEC check was ' + ago(lastCheck) + '. Showing what we have.' : 'Showing saved data from ' + et(new Date(savedAt() || Date.now()).toISOString()) + '.'); }
   });
   document.addEventListener('toggle', function (e) {
     var d = e.target;

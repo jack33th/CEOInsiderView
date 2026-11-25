@@ -63,6 +63,12 @@ Owner wants the site to remember options and preferences: persist any new settin
 Insider and Congress rows share `.row__head`. A layout change for one broke the other on phones
 (the score removal made Congress initials overlap names). Any row/layout change: check BOTH tabs at
 375 px and 1280 px before shipping.
+Run it: `node tests/devserver.js` (needs SEC_USER_AGENT), then `node tests/ui_check.js` (6 widths x 2 tabs;
+fails on "—", undefined/NaN/null, "nightly/next update", overlapping rows, sideways scroll, page errors).
+
+Phase 1 of the polish spec (nothing blank, nothing ambiguous) shipped 2026-11-25: rows and ticker show
+"since buy", missing values are omitted (never "—"), header pill = Live / Checked Xm ago / Saved X ago.
+Phases 2 (identity) and 3 (finish) in docs/superpowers/specs/2026-11-25-insider-view-polish-and-trust-design.md.
 
 ## Leave out
 Guesses at why a CEO bought, more tabs, a "trending" page. Not needed yet: a database, user
