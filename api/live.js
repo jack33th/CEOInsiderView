@@ -68,7 +68,8 @@ function parseForm4(text, meta) {
   if (!docMatch) return [];
   const doc = docMatch[0];
   const issuer = tagText(doc, 'issuer');
-  const ticker = tagText(issuer, 'issuerTradingSymbol').toUpperCase();
+  // "HEI, HEI-A" -> HEI, "NYSE:FLG" -> FLG
+  const ticker = (tagText(issuer, 'issuerTradingSymbol').toUpperCase().trim().split(/[\s,;]+/)[0] || '').split(':').pop();
   const company = tagText(issuer, 'issuerName');
   if (!ticker || ticker === 'NONE' || ticker === 'N/A') return [];
 

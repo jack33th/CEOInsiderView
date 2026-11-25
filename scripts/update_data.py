@@ -191,8 +191,8 @@ def parse_form4(text, min_value=0.0, url="", codes=("P",)):
     issuer = root.find("issuer")
     if issuer is None:
         return []
-    # some filers list several classes in one field ("HEI, HEI-A"): keep the first symbol
-    ticker = (re.split(r"[\s,;]+", _t(issuer, "issuerTradingSymbol").upper().strip()) or [""])[0]
+    # some filers list several classes in one field ("HEI, HEI-A") or add the exchange ("NYSE:FLG")
+    ticker = (re.split(r"[\s,;]+", _t(issuer, "issuerTradingSymbol").upper().strip()) or [""])[0].split(":")[-1]  # "NYSE:FLG" -> FLG
     company = _t(issuer, "issuerName")
     if not ticker or ticker in ("NONE", "N/A"):
         return []

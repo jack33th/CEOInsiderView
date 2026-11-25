@@ -243,10 +243,53 @@
     roll($('s1'), String(TRADES.length), 800); roll($('s2'), money(total), 900); roll($('s3'), String(Object.keys(cos).length), 800);
   }
 
+  /* =================== prices on demand (/api/prices) =================== */
+  // Saved price files only refresh when the GitHub Action runs, so buys that arrive between runs
+  // (often after the US market closes) have none. /api/prices fetches daily closes for any ticker,
+  // any time of day; the row's price, mini chart and the full chart fill in when it answers.
+  var PX = { wait: {}, done: {} };
+  function apiPrices(tk) {
+    if (PX.done[tk]) return PX.done[tk];
+    if (location.protocol.indexOf('http') !== 0) return Promise.resolve(false);
+    PX.wait[tk] = true;
+    return (PX.done[tk] = fetch('api/prices?t=' + encodeURIComponent(tk)).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (j) {
+      if (!j || !j.c || j.c.length < 3) throw 0;
+      SERIES[tk] = { d: j.d, c: j.c, full: true };
+      if (!SPARK[tk] || !SPARK[tk].c) {
+        var k = Math.max(0, j.c.length - 45), d0 = j.d[k];
+        SPARK[tk] = { d0: d0, o: j.d.slice(k).map(function (x) { return x - d0; }), c: j.c.slice(k), hi: j.hi, lo: j.lo, last: j.last, prev: j.prev, asof: j.asof, s: j.s };
+      }
+      return true;
+    }).catch(function () { return false; }).then(function (ok) { delete PX.wait[tk]; return ok; }));
+  }
+  function fillMissingPrices(list) {
+    var need = {};
+    list.forEach(function (t) { if (!SPARK[t.ticker] || !SPARK[t.ticker].c) need[t.ticker] = 1; });
+    Object.keys(need).forEach(function (tk) {
+      apiPrices(tk).then(function () { refreshTicker(tk); });
+      refreshTicker(tk);  // shows "Loading price history…" right away
+    });
+  }
+  function refreshTicker(tk) {  // update just this company's rows, so open panels and scroll position stay put
+    TRADES.forEach(function (t) {
+      if (t.ticker !== tk) return;
+      var row = document.querySelector('.row[data-id="' + CSS.escape(t.id) + '"]');
+      if (!row) return;
+      var right = row.querySelector('.row__right');
+      if (right) right.innerHTML = '<span class="row__amt">' + money(t.value) + '</span>' + quoteHtml(t.ticker);
+      var mini = row.querySelector('[data-mini]');
+      if (mini) mini.innerHTML = miniInner(t);
+    });
+    if (!PX.wait[tk]) renderTape();
+  }
+
   /* expanded row */
   function miniChart(t) {
+    return '<div class="mini__c" data-mini="' + esc(t.id) + '">' + miniInner(t) + '</div>';
+  }
+  function miniInner(t) {
     var s = SPARK[t.ticker];
-    if (!s || !s.c || s.c.length < 3) return '<p class="fine">No price history for ' + esc(t.ticker) + ' yet.</p>';
+    if (!s || !s.c || s.c.length < 3) return '<p class="fine">' + (PX.wait[t.ticker] ? 'Loading price history…' : 'No price history for ' + esc(t.ticker) + ' yet.') + '</p>';
     var n = s.c.length, lo = Math.min.apply(null, s.c), hi = Math.max.apply(null, s.c), W = 300, H = 64;
     if (t.price) { lo = Math.min(lo, t.price); hi = Math.max(hi, t.price); }
     function X(i) { return 2 + i / (n - 1) * (W - 4); }
@@ -453,6 +496,7 @@
       if (added.length) {
         added.forEach(function (t) { TRADES.push(t); freshIds[t.id] = 1; });
         renderSummary(); renderFilters(); renderFeed(); renderTape();
+        fillMissingPrices(added);
         var good = added.filter(function (t) { return WATCH.indexOf(t.ticker) >= 0; });
         toast(added.length === 1 ? 'New: ' + added[0].insider + ' bought ' + money(added[0].value) + ' of ' + added[0].ticker : added.length + ' new CEO buys');
         if (good.length) notify(good);
@@ -549,10 +593,11 @@
     var name = tk.toUpperCase().replace(/[^A-Z0-9._-]/g, '_');
     return fetch('prices/' + encodeURIComponent(name) + '.json').then(function (r) { if (!r.ok) throw 0; return r.json(); })
       .then(function (s) { return (SERIES[tk] = { d: s.d, c: s.c, full: true }); })
-      .catch(function () {
+      .catch(function () { return apiPrices(tk).then(function () {
+        if (SERIES[tk]) return SERIES[tk];
         var s = SPARK[tk];
         return s ? (SERIES[tk] = { d: s.o.map(function (o) { return s.d0 + o; }), c: s.c, full: false }) : null;
-      });
+      }); });
   }
   var RANGES = [['1M', 31], ['3M', 92], ['6M', 183], ['1Y', 366]];
   function drawSheet() {
@@ -793,6 +838,7 @@
 
   $('sort').value = st.sort;
   renderSummary(); renderFilters(); renderFeed(); renderTape(); renderTrack(); liveLabel();
+  fillMissingPrices(TRADES);
   show(location.hash.slice(1) || store.get('cib_view', 'buys'));  // a link with #congress wins over the remembered tab
   poll(); setInterval(poll, 30000); setInterval(liveLabel, 10000);
   window.CIV = { trades: TRADES, facts: facts, open: openSheet }; // handy for debugging in the console

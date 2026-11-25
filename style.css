@@ -147,6 +147,7 @@ dl.kv { margin: 0; }
 .pos { color: var(--green); } .neg { color: var(--red); }
 
 .mini { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.mini__c { min-width: 0; }
 .mini svg { width: 100%; height: 64px; display: block; }
 .mini__l { fill: none; stroke-width: 1.8; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .mini__l.up { stroke: var(--green); } .mini__l.dn { stroke: var(--red); }
