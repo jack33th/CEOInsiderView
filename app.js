@@ -110,52 +110,39 @@
     return before <= 0 ? Infinity : t.shares / before * 100;
   }
 
-  /* =================== conviction score =================== */
+  /* =================== facts (no score) =================== */
+  // The 0-100 score was removed on 2026-11-24 after failing its test: high scores did worse
+  // (scripts/score_test/README.md). These are the same facts, shown plainly, with what the test found.
+  var TEST = { label: 'Our test of 2,116 CEO buys', url: 'https://github.com/jack33th/CEOInsiderView/blob/main/scripts/score_test/README.md' };
   var RES = {
-    contrarian: { label: 'Research: insiders tend to buy after drops', url: 'https://www.interactivebrokers.com/campus/traders-insight/securities/stocks/what-corporate-insider-buying-can-tell-investors-evidence-from-academic-research/' },
-    cluster: { label: 'Study: cluster buys earned ~2x single buys', url: 'https://journal.tinkoff.ru/media/insider-pdf-002.pdf' },
     unusual: { label: 'NBER: unusual trades carry the signal', url: 'https://www.nber.org/papers/w16454.pdf' },
     plan: { label: 'SEC: Rule 10b5-1 trading plans', url: 'https://www.sec.gov/newsroom/press-releases/2022-222' }
   };
   function filingSrc(t) { return t.url ? { label: 'SEC Form 4', url: t.url } : (t.sources && t.sources[0]) || null; }
-  function score(t) {
-    if (t._score) return t._score;
-    var parts = [], src = filingSrc(t);
-    // 1. Size (0-25), log scale: $25K = 0, $1M = 17, $5M+ = 25
-    var size = Math.max(0, Math.min(25, Math.round((Math.log10(Math.max(t.value, 1)) - Math.log10(25000)) / (Math.log10(5e6) - Math.log10(25000)) * 25)));
-    parts.push({ pts: size, max: 25, t: 'Size: ' + money(t.value) + ' of their own money',
-      how: t.shares && t.price ? num(t.shares) + ' shares × ' + p2(t.price) + '. Scored on a scale where $25K = 0 and $5M or more = 25.' : 'Scored on a scale where $25K = 0 and $5M or more = 25.', src: src });
-    // 2. Stake growth (0-25)
-    var sp = stakePct(t), st = 0;
-    if (sp === Infinity) st = 20; else if (sp != null) st = sp >= 100 ? 25 : sp >= 50 ? 20 : sp >= 20 ? 14 : sp >= 10 ? 9 : sp >= 3 ? 4 : 0;
-    parts.push({ pts: st, max: 25, na: sp == null, t: sp == null ? 'Stake growth: not in this filing' : sp === Infinity ? 'Stake growth: a brand-new position' : 'Stake growth: +' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% more shares',
-      how: sp == null ? 'Older rows lack the "shares owned after" figure. The next update adds it.' : 'Owned ' + num(t.ownedAfter) + ' shares directly after the buy, up from ' + num(t.ownedAfter - t.shares) + '. Doubling a stake matters more than adding 1%.', src: sp == null ? null : src });
-    // 3. Drop before the buy (0-20)
-    var dp = t.dip && t.dip.pct, dpts = dp >= 40 ? 20 : dp >= 25 ? 14 : dp >= 15 ? 8 : dp >= 8 ? 4 : 0;
-    parts.push({ pts: dpts, max: 20, na: dp == null, t: dp != null ? 'Bought ' + dp + '% below the ' + (t.dip.base || 'recent peak') : 'Drop before the buy: unknown',
-      how: dp != null ? 'Price paid ' + p2(t.price) + ' compared with the highest close in the 90 days before.' : 'No price history for this ticker yet.',
-      src: dp != null ? { label: 'Daily closes (' + ((SPARK[t.ticker] || {}).s || 'price feed') + ')', url: 'https://finance.yahoo.com/quote/' + encodeURIComponent(t.ticker) + '/history' } : null, res: dpts ? RES.contrarian : null });
-    // 4. Other insiders / coming back (0-20)
-    var others = {}, again = 0;
-    TRADES.forEach(function (x) {
-      if (x.ticker !== t.ticker || x === t || Math.abs(daysApart(x.date, t.date)) > 30) return;
-      if (x.insider === t.insider) again++; else others[x.insider] = x.date;
-    });
-    var on = Object.keys(others), cpts = Math.min(20, (on.length >= 2 ? 15 : on.length ? 10 : 0) + (again ? 5 : 0));
-    parts.push({ pts: cpts, max: 20, t: on.length ? on.length + ' other insider' + (on.length > 1 ? 's' : '') + ' bought within 30 days' + (again ? ', and the CEO bought more than once' : '') : again ? 'The CEO bought more than once within 30 days' : 'No other insider buys nearby',
-      how: on.length ? on.map(function (n) { return esc(n) + ' (' + day(others[n]) + ')'; }).join(', ') : 'Checked every buy at this company within 30 days either side.', src: null, res: on.length ? RES.cluster : null });
-    // 5. Unusual: first buy in a year (0-10)
-    var upts = t.prior12 == null ? 0 : t.prior12 === 0 ? 10 : t.prior12 >= 4 ? 0 : 4;
-    parts.push({ pts: upts, max: 10, na: t.prior12 == null, t: t.prior12 == null ? 'Buying history: arrives with the nightly update' : t.prior12 === 0 ? 'First CEO buy here in 12 months' : t.prior12 + ' earlier CEO buy' + (t.prior12 > 1 ? 's' : '') + ' in the last 12 months',
-      how: t.prior12 == null ? 'Needs the 12-month filing history, which the daily update collects.' : 'Counted from every Form 4 filed for this company in the past year.', src: null, res: t.prior12 === 0 ? RES.unusual : null });
-    // 6. Pre-planned (minus 15)
-    if (t.plan) parts.push({ pts: -15, t: 'Pre-scheduled under a 10b5-1 plan', how: 'The filer ticked the 10b5-1 box, so the buy was arranged in advance, not decided this week.', src: src, res: RES.plan });
-    // Factors we can't check yet are left out, and the rest is scaled to 100, so missing data never drags a score down.
-    var raw = parts.reduce(function (a, p) { return a + (p.na ? 0 : p.pts); }, 0);
-    var max = parts.reduce(function (a, p) { return a + (p.na || !p.max ? 0 : p.max); }, 0) || 100;
-    var known = parts.filter(function (p) { return p.max && !p.na; }).length;
-    var total = Math.max(0, Math.min(100, Math.round(raw / max * 100)));
-    return (t._score = { total: total, parts: parts, known: known, raw: raw, max: max, tier: total >= 60 ? 'hi' : total >= 35 ? 'mid' : 'lo' });
+  function againCount(t) {  // other buys by the same CEO at this company within 30 days, among the buys listed here
+    return TRADES.filter(function (x) { return x !== t && x.ticker === t.ticker && x.insider === t.insider && Math.abs(daysApart(x.date, t.date)) <= 30; }).length;
+  }
+  function facts(t) {
+    var out = [], src = filingSrc(t), sp = stakePct(t), dp = t.dip && t.dip.pct, again = againCount(t);
+    // mark: 'good' = went with better results in the test, 'flag' = went with worse results, '' = neutral
+    out.push({ mark: '', t: 'Size: ' + money(t.value) + ' of their own money',
+      how: (t.shares && t.price ? num(t.shares) + ' shares × ' + p2(t.price) + '. ' : '') + 'In our test, bigger buys did not do better.', src: src, res: TEST });
+    out.push({ mark: '', t: sp == null ? 'Stake growth: not in this filing' : sp === Infinity ? 'Stake growth: a brand-new position' : 'Stake growth: +' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% more shares',
+      how: sp == null ? 'Older rows lack the "shares owned after" figure. The next update adds it.' : 'Owned ' + num(t.ownedAfter) + ' shares directly after the buy, up from ' + num(t.ownedAfter - t.shares) + '.', src: sp == null ? null : src });
+    out.push({ mark: dp >= 40 ? 'flag' : '', t: dp != null ? 'Bought ' + dp + '% below the ' + (t.dip.base || 'recent peak') : 'Drop before the buy: unknown',
+      how: dp != null ? 'Price paid ' + p2(t.price) + ' compared with the highest close in the 90 days before.' + (dp >= 40 ? ' In our test, buys after a 40%+ drop did worse than other CEO buys over 90 days.' : '') : 'No price history for this ticker yet.',
+      src: dp != null ? { label: 'Daily closes (' + ((SPARK[t.ticker] || {}).s || 'price feed') + ')', url: 'https://finance.yahoo.com/quote/' + encodeURIComponent(t.ticker) + '/history' } : null, res: dp >= 40 ? TEST : null });
+    if (t.prior12 != null) {
+      var serial = t.prior12 >= 4;
+      out.push({ mark: t.prior12 === 0 ? 'good' : serial ? 'flag' : '', t: t.prior12 === 0 ? 'First CEO buy here in 12 months' : t.prior12 + ' earlier CEO buy' + (t.prior12 > 1 ? 's' : '') + ' in the last 12 months',
+        how: 'Counted from every Form 4 filed for this company in the past year. ' + (t.prior12 === 0 ? 'In our test, a first buy in a year did slightly better than average.' : serial ? 'In our test, frequent buyers (4+ a year) did worse than average.' : ''),
+        src: null, res: t.prior12 === 0 ? RES.unusual : serial ? TEST : null });
+    } else {
+      out.push({ mark: '', t: 'Buying history: arrives with the nightly update', how: 'Needs the 12-month filing history, which the daily update collects.', src: null });
+    }
+    if (again) out.push({ mark: '', t: 'The CEO bought ' + (again + 1) + ' times within 30 days', how: 'Other buys by this CEO listed here. Buys by other insiders aren\'t tracked yet.', src: null });
+    if (t.plan) out.push({ mark: 'flag', t: 'Pre-scheduled under a 10b5-1 plan', how: 'The filer ticked the 10b5-1 box, so the buy was arranged in advance, not decided this week. In our test, pre-planned buys did clearly worse.', src: src, res: RES.plan });
+    return out;
   }
 
   /* =================== state =================== */
@@ -172,16 +159,19 @@
 
   /* =================== CEO feed =================== */
   var FILTERS = [
-    ['all', 'All'], ['hi', 'High conviction'], ['watch', 'Watchlist'], ['dip', 'Bought the dip'],
-    ['cluster', 'Several insiders'], ['big', '$1M+'], ['first', 'First in a year']
+    ['all', 'All'], ['watch', 'Watchlist'], ['dip', 'Bought the dip'], ['big', '$1M+'], ['first', 'First in a year']
   ];
+  // Remembered between visits: filter, sort, Congress filter, last tab (search is not: a stale search looks like missing data).
+  (function () {
+    var f = store.get('cib_filter', 'all'), s = store.get('cib_sort', 'new');
+    if (FILTERS.some(function (x) { return x[0] === f; })) st.f = f;
+    if (st.f === 'first' && !TRADES.some(function (t) { return t.prior12 != null; })) st.f = 'all'; // that chip is hidden without history
+    if (['new', 'value', 'dip'].indexOf(s) >= 0) st.sort = s;
+  })();
   function passes(t) {
-    var s = score(t);
     switch (st.f) {
-      case 'hi': return s.total >= 60;
       case 'watch': return WATCH.indexOf(t.ticker) >= 0;
-      case 'dip': return t.dip && t.dip.pct >= 25;
-      case 'cluster': return s.parts[3].pts >= 10;
+      case 'dip': return t.dip && t.dip.pct >= 40;  // 25% matched ~60% of buys, so it didn't filter
       case 'big': return t.value >= 1e6;
       case 'first': return t.prior12 === 0;
     }
@@ -195,7 +185,6 @@
   function sorted(list) {
     var by = {
       'new': function (a, b) { return filedMs(b) - filedMs(a) || b.value - a.value; },
-      score: function (a, b) { return score(b).total - score(a).total || filedMs(b) - filedMs(a); },
       value: function (a, b) { return b.value - a.value; },
       dip: function (a, b) { return ((b.dip && b.dip.pct) || -1) - ((a.dip && a.dip.pct) || -1); }
     }[st.sort];
@@ -216,13 +205,12 @@
     return q ? '<span class="q ' + (q.chg >= 0 ? 'pos' : 'neg') + '">' + p2(q.last) + ' ' + (q.chg >= 0 ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</span>' : '';
   }
   function rowHtml(t) {
-    var s = score(t), sp = stakePct(t), w = WATCH.indexOf(t.ticker) >= 0, open = !!st.open[t.id];
+    var sp = stakePct(t), w = WATCH.indexOf(t.ticker) >= 0, open = !!st.open[t.id];
     var stake = t.plan ? '<span class="row__stake plan">Pre-planned</span>'
       : sp === Infinity ? '<span class="row__stake">New position</span>'
       : sp != null && sp >= 1 ? '<span class="row__stake">+' + (sp >= 10 ? Math.round(sp) : sp.toFixed(1)) + '% stake</span>' : '';
     return '<article class="row' + (open ? ' is-open' : '') + (isNew(t) ? ' is-new' : '') + (freshIds[t.id] ? ' fresh' : '') + '" data-id="' + esc(t.id) + '">' +
       '<button type="button" class="row__head" aria-expanded="' + open + '" aria-controls="b-' + esc(t.id) + '">' +
-      '<span class="ring ring--' + s.tier + '" style="--p:' + s.total + '" title="Conviction score ' + s.total + ' of 100"><span>' + s.total + '</span></span>' +
       '<span class="row__main"><span class="row__l1"><span class="row__co">' + esc(t.company) + '</span><span class="tk">' + esc(t.ticker) + '</span>' + (w ? '<span class="star" title="On your watchlist">★</span>' : '') + '</span>' +
       '<span class="row__l2"><span>' + esc(t.insider) + '</span><span class="row__time">' + (t.filedAt ? 'Filed ' + ago(filedMs(t)) : 'Bought ' + day(t.date)) + '</span>' + stake + '</span></span>' +
       '<span class="row__right"><span class="row__amt">' + money(t.value) + '</span>' + quoteHtml(t.ticker) + '</span></button>' +
@@ -250,10 +238,9 @@
   function renderSummary() {
     var total = TRADES.reduce(function (a, t) { return a + t.value; }, 0), cos = {};
     TRADES.forEach(function (t) { cos[t.ticker] = 1; });
-    var hi = TRADES.filter(function (t) { return score(t).total >= 60; }).length;
     var span = TRADES.length ? daysApart(TRADES.reduce(function (m, t) { return t.date < m ? t.date : m; }, TRADES[0].date), new Date().toISOString().slice(0, 10)) : 0;
-    $('summary').innerHTML = '<b id="s1"></b> CEO buys in ' + span + ' days · <b id="s2"></b> in total · <b id="s3"></b> companies · <b id="s4"></b> high conviction';
-    roll($('s1'), String(TRADES.length), 800); roll($('s2'), money(total), 900); roll($('s3'), String(Object.keys(cos).length), 800); roll($('s4'), String(hi), 800);
+    $('summary').innerHTML = '<b id="s1"></b> CEO buys in ' + span + ' days · <b id="s2"></b> in total · <b id="s3"></b> companies';
+    roll($('s1'), String(TRADES.length), 800); roll($('s2'), money(total), 900); roll($('s3'), String(Object.keys(cos).length), 800);
   }
 
   /* expanded row */
@@ -272,7 +259,7 @@
       '<path class="mini__l ' + (s.c[n - 1] >= s.c[0] ? 'up' : 'dn') + '" d="' + d + '"/>' + mk + '</svg>';
   }
   function bodyHtml(t) {
-    var s = score(t), sp = stakePct(t), sb = since(t), q = quote(t.ticker), lag = t.filedAt ? daysApart(t.date, t.filedAt.slice(0, 10)) : null;
+    var sp = stakePct(t), sb = since(t), q = quote(t.ticker), lag = t.filedAt ? daysApart(t.date, t.filedAt.slice(0, 10)) : null;
     var kv = [
       ['Bought on', day(t.date, true), ''],
       ['Filed with SEC', t.filedAt ? et(t.filedAt) : '—', lag != null ? (lag === 0 ? 'same day' : lag + (lag === 1 ? ' day' : ' days') + ' after the trade') : ''],
@@ -295,12 +282,12 @@
       '<div class="more-d__body" id="m-' + esc(t.id) + '"></div></details></div>';
   }
   function knowMoreHtml(t) {
-    var s = score(t), co = COMPANIES && COMPANIES[t.ticker], q = quote(t.ticker), html = '';
-    html += '<div><div class="sub-h">Why it scores ' + s.total + ' / 100</div><ul class="score-list">' + s.parts.map(function (p) {
-      return '<li><span class="pts' + (p.na || p.pts === 0 ? ' zero' : p.pts < 0 ? ' minus' : '') + '">' + (p.na ? '–' : (p.pts > 0 ? '+' : '') + p.pts) + '</span><div>' +
+    var co = COMPANIES && COMPANIES[t.ticker], q = quote(t.ticker), html = '';
+    html += '<div><div class="sub-h">The facts</div><ul class="score-list">' + facts(t).map(function (p) {
+      return '<li><span class="pts' + (p.mark === 'good' ? ' good' : p.mark === 'flag' ? ' minus' : ' zero') + '"' + (p.mark ? ' aria-label="' + (p.mark === 'good' ? 'Better in our test' : 'Red flag in our test') + '"' : ' aria-hidden="true"') + '>' + (p.mark === 'good' ? '✓' : p.mark === 'flag' ? '!' : '·') + '</span><div>' +
         '<div class="why__t">' + esc(p.t) + '</div><div class="why__how">' + p.how + '</div>' +
         (p.src || p.res ? '<div class="why__src">' + (p.src ? 'Source: ' + srcLink(p.src) : '') + (p.res ? srcLink(p.res) : '') + '</div>' : '') + '</div></li>';
-    }).join('') + '</ul><p class="fine" style="margin-top:8px">' + (s.known < 5 ? 'Scored on ' + s.known + ' of 5 factors (' + s.raw + ' of ' + s.max + ' possible points, scaled to 100). Factors marked – aren\'t counted yet. ' : '') + 'Our own formula from facts in the filing. Not yet proven to predict returns: see Track record.</p></div>';
+    }).join('') + '</ul><p class="fine" style="margin-top:8px">✓ and ! show what went with better or worse results in our test of 2,116 CEO buys (2025–26). They describe the past, not a prediction.</p></div>';
     html += '<div><div class="sub-h">The company</div>';
     if (co) {
       var cap = co.sharesOut && q ? co.sharesOut * q.last : null;
@@ -366,9 +353,7 @@
     function med(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[Math.floor(a.length / 2)] : 0; }
     var r = done.map(function (t) { return t.r30; }), spy = done.filter(function (t) { return t.spy30 != null; }).map(function (t) { return t.spy30; });
     var winners = r.filter(function (x) { return x > 0; }).length, beat = done.filter(function (t) { return t.spy30 != null && t.r30 > t.spy30; }).length;
-    var hiDone = done.filter(function (t) { return t.ticker && score(t).total >= 60; });
     var rows = [['All CEO buys', med(r), r.length]];
-    if (hiDone.length >= 3) rows.push(['Conviction 60+', med(hiDone.map(function (t) { return t.r30; })), hiDone.length]);
     if (spy.length) rows.push(['S&P 500', med(spy), spy.length]);
     var maxAbs = Math.max.apply(null, rows.map(function (x) { return Math.abs(x[1]); })) || 1;
     el.innerHTML = '<h2 id="track-h">Track record: 30 days after the buy</h2>' +
@@ -390,8 +375,57 @@
         (q ? ' <span class="' + (q.chg >= 0 ? 'up' : 'dn') + '">' + (q.chg >= 0 ? '▲' : '▼') + Math.abs(q.chg).toFixed(1) + '%</span>' : '') + '</button>';
     }).join('');
     $('tape-track').innerHTML = one + one.replace(/<button /g, '<button tabindex="-1" aria-hidden="true" ');
-    $('tape').style.setProperty('--tape-dur', Math.max(30, latest.length * 4) + 's');
+    TAPE.secs = Math.max(30, latest.length * 4);  // time for one full pass of the list
   }
+  /* Auto-scroll in JS (not a CSS animation) so the strip can also be swiped and every item stays tappable.
+     Pauses while hovered, touched or keyboard-focused. Mouse leaving resumes at once; a finger lifting
+     resumes after 1.5s so it doesn't fight a swipe that is still gliding.
+     People with Reduce Motion on get a still (swipeable) strip plus a play button; their choice is
+     remembered. Nobody else sees a button. */
+  var REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var TAPE = { secs: 60, on: REDUCED ? store.get('cib_tape', false) : true, hold: false, resumeAt: 0, pos: 0, last: 0 };
+  function tapeButton() {
+    var b = $('tape-btn');
+    if (!b) return;
+    b.setAttribute('aria-pressed', String(TAPE.on));
+    b.setAttribute('aria-label', TAPE.on ? 'Stop the moving ticker' : 'Play the moving ticker');
+    b.innerHTML = TAPE.on ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z"/></svg>';
+  }
+  function tapeFrame(ts) {
+    var el = $('tape'), half = $('tape-track').scrollWidth / 2;
+    var moving = TAPE.on && !TAPE.hold && Date.now() > TAPE.resumeAt && !document.hidden && half > el.clientWidth / 2;
+    if (moving && TAPE.last) {
+      TAPE.pos += Math.min(ts - TAPE.last, 50) * half / (TAPE.secs * 1000);  // cap the step so a slow frame never jumps
+      if (TAPE.pos >= half) TAPE.pos -= half;   // second copy lines up with the first: no visible jump
+      el.scrollLeft = TAPE.pos;
+    } else {
+      if (half && el.scrollLeft >= half) el.scrollLeft -= half;  // swiped past the end: wrap
+      TAPE.pos = el.scrollLeft;
+    }
+    TAPE.last = ts;
+    requestAnimationFrame(tapeFrame);
+  }
+  (function () {
+    var el = $('tape');
+    el.addEventListener('mouseenter', function () { TAPE.hold = true; });
+    el.addEventListener('mouseleave', function () { TAPE.hold = false; TAPE.resumeAt = 0; });
+    el.addEventListener('touchstart', function () { TAPE.hold = true; }, { passive: true });
+    function lift() { TAPE.hold = false; TAPE.resumeAt = Date.now() + 1500; }
+    el.addEventListener('touchend', lift, { passive: true });
+    el.addEventListener('touchcancel', lift, { passive: true });
+    // Only keyboard focus pauses it; a mouse click also focuses the item, and that must not freeze the strip.
+    el.addEventListener('focusin', function (e) { if (e.target.matches(':focus-visible')) TAPE.hold = true; });
+    el.addEventListener('focusout', function () { if (!el.matches(':hover')) TAPE.hold = false; });
+    if (REDUCED) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'tape__btn'; b.id = 'tape-btn';
+      b.addEventListener('click', function () { TAPE.on = !TAPE.on; store.set('cib_tape', TAPE.on); TAPE.resumeAt = 0; tapeButton(); });
+      $('tape-wrap').appendChild(b); $('tape-wrap').classList.add('has-btn');
+      tapeButton();
+    }
+    requestAnimationFrame(tapeFrame);
+  })();
   function jumpTo(id) {
     st.f = 'all'; st.q = ''; $('q').value = ''; st.sort = 'new'; $('sort').value = 'new';
     var list = sorted(TRADES), i = list.indexOf(byId(id));
@@ -419,7 +453,7 @@
       if (added.length) {
         added.forEach(function (t) { TRADES.push(t); freshIds[t.id] = 1; });
         renderSummary(); renderFilters(); renderFeed(); renderTape();
-        var good = added.filter(function (t) { return score(t).total >= 60 || WATCH.indexOf(t.ticker) >= 0; });
+        var good = added.filter(function (t) { return WATCH.indexOf(t.ticker) >= 0; });
         toast(added.length === 1 ? 'New: ' + added[0].insider + ' bought ' + money(added[0].value) + ' of ' + added[0].ticker : added.length + ' new CEO buys');
         if (good.length) notify(good);
         if (document.hidden) document.title = '(' + added.length + ') CEO Insider View';
@@ -434,8 +468,8 @@
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(function (r) { swReg = r; }).catch(function () {});
   function notify(list) {
     if (!NOTIFY || !('Notification' in window) || Notification.permission !== 'granted') return;
-    var title = list.length > 1 ? list.length + ' high-conviction CEO buys' : list[0].ticker + ': CEO bought ' + money(list[0].value);
-    var body = list.slice(0, 3).map(function (t) { return t.insider + ' · ' + t.ticker + ' · score ' + score(t).total; }).join('\n');
+    var title = list.length > 1 ? list.length + ' new buys on your watchlist' : list[0].ticker + ': CEO bought ' + money(list[0].value);
+    var body = list.slice(0, 3).map(function (t) { return t.insider + ' · ' + t.ticker + ' · ' + money(t.value); }).join('\n');
     try { if (swReg && swReg.showNotification) swReg.showNotification(title, { body: body, tag: 'cib' }); else new Notification(title, { body: body }); } catch (e) {}
   }
   function toggleBell() {
@@ -443,7 +477,7 @@
     if (!('Notification' in window)) { toast('This browser can\'t show alerts. Use the ntfy app (see README).'); return; }
     Notification.requestPermission().then(function (p) {
       NOTIFY = p === 'granted'; store.set('cib_notify', NOTIFY); renderFilters();
-      toast(NOTIFY ? 'Alerts on for conviction 60+ and your watchlist, while this page is open' : 'Alerts are blocked in your browser settings');
+      toast(NOTIFY ? 'Alerts on for companies on your watchlist, while this page is open' : 'Alerts are blocked in your browser settings');
     });
   }
 
@@ -634,6 +668,7 @@
   /* =================== Congress (loaded on first open) =================== */
   var POL = null, cst = { q: '', f: 'all', limit: 40, open: {} };
   var CF = [['all', 'All'], ['buy', 'Buys'], ['sell', 'Sells'], ['House', 'House'], ['Senate', 'Senate'], ['D', 'Democrats'], ['R', 'Republicans']];
+  (function () { var f = store.get('cib_cfilter', 'all'); if (CF.some(function (x) { return x[0] === f; })) cst.f = f; })();
   function polRows() {
     return POL.trades.filter(function (t) {
       if (cst.f === 'buy' || cst.f === 'sell') { if (t.type !== cst.f) return false; }
@@ -707,6 +742,7 @@
       $('tab-' + v).classList.toggle('is-on', on); $('tab-' + v).setAttribute('aria-selected', String(on));
     });
     document.querySelector('.seg').setAttribute('data-on', view);
+    store.set('cib_view', view);
     if (view === 'congress') openCongress();
   }
   document.querySelector('.seg').addEventListener('click', function (e) {
@@ -737,8 +773,8 @@
       return;
     }
     if ((el = e.target.closest('#bell'))) { toggleBell(); return; }
-    if ((el = e.target.closest('[data-f]'))) { st.f = el.getAttribute('data-f'); st.limit = 40; renderFilters(); renderFeed(); return; }
-    if ((el = e.target.closest('[data-cf]'))) { cst.f = el.getAttribute('data-cf'); cst.limit = 40; renderCongress(); return; }
+    if ((el = e.target.closest('[data-f]'))) { st.f = el.getAttribute('data-f'); store.set('cib_filter', st.f); st.limit = 40; renderFilters(); renderFeed(); return; }
+    if ((el = e.target.closest('[data-cf]'))) { cst.f = el.getAttribute('data-cf'); store.set('cib_cfilter', cst.f); cst.limit = 40; renderCongress(); return; }
     if (e.target.closest('#live')) { toast(liveOk ? 'Checking the SEC every 30 seconds. Last check ' + ago(lastCheck) + '.' : 'Live feed off here. Data last updated ' + $('live-text').textContent.replace('Updated ', '') + '.'); }
   });
   document.addEventListener('toggle', function (e) {
@@ -751,12 +787,13 @@
   var qt;
   $('q').addEventListener('input', function (e) { clearTimeout(qt); qt = setTimeout(function () { st.q = e.target.value.trim(); st.limit = 40; renderFeed(); }, 80); });
   $('cq').addEventListener('input', function (e) { clearTimeout(qt); qt = setTimeout(function () { cst.q = e.target.value.trim(); cst.limit = 40; renderCongress(); }, 80); });
-  $('sort').addEventListener('change', function (e) { st.sort = e.target.value; renderFeed(); });
+  $('sort').addEventListener('change', function (e) { st.sort = e.target.value; store.set('cib_sort', st.sort); renderFeed(); });
   $('more').addEventListener('click', function () { st.limit += 40; renderFeed(); });
   $('c-more').addEventListener('click', function () { cst.limit += 40; renderCongress(); });
 
+  $('sort').value = st.sort;
   renderSummary(); renderFilters(); renderFeed(); renderTape(); renderTrack(); liveLabel();
-  show(location.hash.slice(1));
+  show(location.hash.slice(1) || store.get('cib_view', 'buys'));  // a link with #congress wins over the remembered tab
   poll(); setInterval(poll, 30000); setInterval(liveLabel, 10000);
-  window.CIV = { trades: TRADES, score: score, open: openSheet }; // handy for debugging in the console
+  window.CIV = { trades: TRADES, facts: facts, open: openSheet }; // handy for debugging in the console
 })();
